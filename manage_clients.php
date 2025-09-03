@@ -490,138 +490,363 @@ $stats = $pdo->query("
 
         <script>
             // Client rates modal functions
-            function showClientRates(clientId) {
-                const modal = document.getElementById('clientRatesModal');
-                
-                // Show modal with animation
-                modal.style.display = 'flex';
-                modal.style.visibility = 'visible';
-                modal.style.opacity = '0';
-                
-                setTimeout(() => {
-                    modal.classList.add('active');
-                    modal.style.opacity = '1';
-                }, 10);
-                
-                document.body.classList.add('modal-open');
-                loadClientRates(clientId);
+// ===========================================
+// UPDATED: showClientRates function for manage_clients.php
+// Replace the existing showClientRates function with this updated version:
+// ===========================================
+
+function showClientRates(clientId) {
+    if (!clientId) {
+        alert('Invalid client ID');
+        return;
+    }
+
+    // Show loading state
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.innerHTML = `
+        <div class="bg-white rounded-xl p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-center py-8">
+                <i class="fas fa-spinner fa-spin text-2xl text-blue-600 mr-3"></i>
+                <span class="text-lg">Loading client rates...</span>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Fetch client rates
+    fetch(`get_client_rates.php?client_id=${clientId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showClientRatesModal(data.client, data.rates);
+                modal.remove();
+            } else {
+                modal.remove();
+                alert('Error loading client rates: ' + data.message);
             }
+        })
+        .catch(error => {
+            modal.remove();
+            console.error('Error fetching client rates:', error);
+            alert('Error loading client rates. Please try again.');
+        });
+}
 
-            function hideClientRatesModal() {
-                const modal = document.getElementById('clientRatesModal');
-                
-                // Hide modal with animation
-                modal.classList.remove('active');
-                modal.style.opacity = '0';
-                
-                setTimeout(() => {
-                    modal.style.display = 'none';
-                    modal.style.visibility = 'hidden';
-                }, 300);
-                
-                document.body.classList.remove('modal-open');
-            }
+function showClientRatesModal(client, rates) {
+    // Remove any existing modals
+    const existingModals = document.querySelectorAll('.client-rates-modal');
+    existingModals.forEach(modal => modal.remove());
 
-            function loadClientRates(clientId) {
-                fetch(`get_client_rates.php?client_id=${clientId}`)
-                    .then(response => response.json())
-                    .then(rates => {
-                        displayClientRates(rates);
-                    })
-                    .catch(error => {
-                        console.error('Error loading client rates:', error);
-                        document.getElementById('clientRatesList').innerHTML = '<p class="text-red-600">Error loading rates</p>';
-                    });
-            }
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'client-rates-modal fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    
+    // Separate rates by container size
+    const rates20ft = rates.filter(rate => rate.container_size === '20ft');
+    const rates40ft = rates.filter(rate => rate.container_size === '40ft');
 
-            function displayClientRates(rates) {
-                const container = document.getElementById('clientRatesList');
-                
-                if (rates.length === 0) {
-                    container.innerHTML = '<p class="text-gray-500 text-center py-4">No rates configured yet</p>';
-                    return;
-                }
+    modal.innerHTML = `
+        <div class="bg-white rounded-xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-hidden shadow-2xl">
+            <!-- Modal Header -->
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 text-white">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-semibold flex items-center gap-2">
+                            <i class="fas fa-money-bill-wave"></i>
+                            Client Rate Structure
+                        </h2>
+                        <p class="text-blue-100 text-sm mt-1">
+                            ${client.client_name} (${client.client_code})
+                        </p>
+                    </div>
+                    <button onclick="this.closest('.client-rates-modal').remove()" 
+                            class="text-white hover:text-gray-200 p-2 rounded-full hover:bg-white hover:bg-opacity-20 transition-colors">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+            </div>
 
-                // Group rates by container size
-                const rates20ft = rates.filter(rate => rate.container_size === '20ft');
-                const rates40ft = rates.filter(rate => rate.container_size === '40ft');
-
-                let html = '';
-
-                if (rates20ft.length > 0) {
-                    html += `
-                        <div class="mb-6">
-                            <h4 class="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
+            <!-- Modal Content -->
+            <div class="p-6 overflow-y-auto" style="max-height: calc(90vh - 120px);">
+                ${rates.length === 0 ? `
+                    <div class="text-center py-12">
+                        <i class="fas fa-chart-line text-4xl text-gray-400 mb-4"></i>
+                        <h3 class="text-lg font-medium text-gray-700 mb-2">No Rates Configured</h3>
+                        <p class="text-gray-500">This client doesn't have any rate configurations yet.</p>
+                        <a href="edit_client.php?id=${client.id}" 
+                           class="inline-flex items-center px-4 py-2 mt-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="fas fa-plus mr-2"></i> Add Rates
+                        </a>
+                    </div>
+                ` : `
+                    <!-- Rate Statistics -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <div class="flex items-center gap-2">
                                 <i class="fas fa-shipping-fast text-blue-600"></i>
-                                20ft Container Rates
-                            </h4>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Movement Type</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Container Type</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Direction</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Rate (₹)</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                    `;
-                    
-                    rates20ft.forEach(rate => {
-                        html += `
-                            <tr>
-                                <td class="px-4 py-2 text-sm text-gray-900">${rate.movement_type}</td>
-                                <td class="px-4 py-2 text-sm text-gray-900">${rate.container_type}</td>
-                                <td class="px-4 py-2 text-sm text-gray-900">${rate.import_export}</td>
-                                <td class="px-4 py-2 text-sm font-medium text-gray-900">₹${parseFloat(rate.rate).toLocaleString()}</td>
-                                <td class="px-4 py-2 text-sm text-gray-500">${rate.remarks || '-'}</td>
-                            </tr>
-                        `;
-                    });
-                    
-                    html += '</tbody></table></div></div>';
-                }
+                                <div>
+                                    <div class="text-2xl font-bold text-blue-600">${rates.length}</div>
+                                    <div class="text-xs text-blue-700">Total Rates</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                            <div class="flex items-center gap-2">
+                                <i class="fas fa-box text-green-600"></i>
+                                <div>
+                                    <div class="text-2xl font-bold text-green-600">${rates20ft.length}</div>
+                                    <div class="text-xs text-green-700">20ft Rates</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                            <div class="flex items-center gap-2">
+                                <i class="fas fa-cube text-purple-600"></i>
+                                <div>
+                                    <div class="text-2xl font-bold text-purple-600">${rates40ft.length}</div>
+                                    <div class="text-xs text-purple-700">40ft Rates</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                            <div class="flex items-center gap-2">
+                                <i class="fas fa-rupee-sign text-yellow-600"></i>
+                                <div>
+                                    <div class="text-2xl font-bold text-yellow-600">₹${Math.round(rates.reduce((sum, rate) => sum + parseFloat(rate.rate || 0), 0) / rates.length).toLocaleString()}</div>
+                                    <div class="text-xs text-yellow-700">Avg Rate</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
-                if (rates40ft.length > 0) {
-                    html += `
+                    <!-- 20ft Container Rates -->
+                    ${rates20ft.length > 0 ? `
                         <div class="mb-6">
-                            <h4 class="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
-                                <i class="fas fa-truck text-green-600"></i>
-                                40ft Container Rates
-                            </h4>
+                            <div class="bg-blue-50 p-3 rounded-lg mb-4">
+                                <h3 class="text-lg font-semibold text-blue-800 flex items-center gap-2">
+                                    <i class="fas fa-box"></i>
+                                    20ft Container Rates (${rates20ft.length})
+                                </h3>
+                            </div>
                             <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200">
+                                <table class="min-w-full bg-white border border-gray-200 rounded-lg">
                                     <thead class="bg-gray-50">
                                         <tr>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Movement Type</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Container Type</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Direction</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Rate (₹)</th>
-                                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Movement</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Container</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Route</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Rate</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Validity</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Remarks</th>
                                         </tr>
                                     </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                    `;
-                    
-                    rates40ft.forEach(rate => {
-                        html += `
-                            <tr>
-                                <td class="px-4 py-2 text-sm text-gray-900">${rate.movement_type}</td>
-                                <td class="px-4 py-2 text-sm text-gray-900">${rate.container_type}</td>
-                                <td class="px-4 py-2 text-sm text-gray-900">${rate.import_export}</td>
-                                <td class="px-4 py-2 text-sm font-medium text-gray-900">₹${parseFloat(rate.rate).toLocaleString()}</td>
-                                <td class="px-4 py-2 text-sm text-gray-500">${rate.remarks || '-'}</td>
-                            </tr>
-                        `;
-                    });
-                    
-                    html += '</tbody></table></div></div>';
-                }
+                                    <tbody class="divide-y divide-gray-200">
+                                        ${rates20ft.map(rate => `
+                                            <tr class="hover:bg-gray-50 transition-colors">
+                                                <td class="px-4 py-3">
+                                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMovementTypeBadgeClass(rate.movement_type)}">
+                                                        ${capitalizeFirst(rate.movement_type)}
+                                                    </span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getContainerTypeBadgeClass(rate.container_type)}">
+                                                        ${capitalizeFirst(rate.container_type)}
+                                                    </span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    ${rate.from_location && rate.to_location ? `
+                                                        <div class="text-sm">
+                                                            <div class="flex items-center gap-1 text-green-600">
+                                                                <i class="fas fa-map-marker-alt text-xs"></i>
+                                                                <span class="font-medium">${rate.from_location}</span>
+                                                            </div>
+                                                            <div class="flex items-center gap-1 text-red-600 mt-1">
+                                                                <i class="fas fa-map-marker-alt text-xs"></i>
+                                                                <span class="font-medium">${rate.to_location}</span>
+                                                            </div>
+                                                        </div>
+                                                    ` : `
+                                                        <span class="text-gray-400 text-sm">Local Movement</span>
+                                                    `}
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span class="text-lg font-bold text-green-600">₹${parseFloat(rate.rate).toLocaleString()}</span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    ${rate.effective_from || rate.effective_to ? `
+                                                        <div class="text-xs text-gray-600">
+                                                            ${rate.effective_from ? `<div>From: ${formatDate(rate.effective_from)}</div>` : ''}
+                                                            ${rate.effective_to ? `<div>To: ${formatDate(rate.effective_to)}</div>` : ''}
+                                                        </div>
+                                                    ` : `
+                                                        <span class="text-gray-400 text-xs">No expiry</span>
+                                                    `}
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    ${rate.remarks ? `
+                                                        <span class="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">${rate.remarks}</span>
+                                                    ` : `
+                                                        <span class="text-gray-400 text-xs">-</span>
+                                                    `}
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : ''}
 
-                container.innerHTML = html;
-            }
+                    <!-- 40ft Container Rates -->
+                    ${rates40ft.length > 0 ? `
+                        <div class="mb-6">
+                            <div class="bg-green-50 p-3 rounded-lg mb-4">
+                                <h3 class="text-lg font-semibold text-green-800 flex items-center gap-2">
+                                    <i class="fas fa-cube"></i>
+                                    40ft Container Rates (${rates40ft.length})
+                                </h3>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full bg-white border border-gray-200 rounded-lg">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Movement</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Container</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Route</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Rate</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Validity</th>
+                                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Remarks</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-200">
+                                        ${rates40ft.map(rate => `
+                                            <tr class="hover:bg-gray-50 transition-colors">
+                                                <td class="px-4 py-3">
+                                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMovementTypeBadgeClass(rate.movement_type)}">
+                                                        ${capitalizeFirst(rate.movement_type)}
+                                                    </span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getContainerTypeBadgeClass(rate.container_type)}">
+                                                        ${capitalizeFirst(rate.container_type)}
+                                                    </span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    ${rate.from_location && rate.to_location ? `
+                                                        <div class="text-sm">
+                                                            <div class="flex items-center gap-1 text-green-600">
+                                                                <i class="fas fa-map-marker-alt text-xs"></i>
+                                                                <span class="font-medium">${rate.from_location}</span>
+                                                            </div>
+                                                            <div class="flex items-center gap-1 text-red-600 mt-1">
+                                                                <i class="fas fa-map-marker-alt text-xs"></i>
+                                                                <span class="font-medium">${rate.to_location}</span>
+                                                            </div>
+                                                        </div>
+                                                    ` : `
+                                                        <span class="text-gray-400 text-sm">Local Movement</span>
+                                                    `}
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span class="text-lg font-bold text-green-600">₹${parseFloat(rate.rate).toLocaleString()}</span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    ${rate.effective_from || rate.effective_to ? `
+                                                        <div class="text-xs text-gray-600">
+                                                            ${rate.effective_from ? `<div>From: ${formatDate(rate.effective_from)}</div>` : ''}
+                                                            ${rate.effective_to ? `<div>To: ${formatDate(rate.effective_to)}</div>` : ''}
+                                                        </div>
+                                                    ` : `
+                                                        <span class="text-gray-400 text-xs">No expiry</span>
+                                                    `}
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    ${rate.remarks ? `
+                                                        <span class="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">${rate.remarks}</span>
+                                                    ` : `
+                                                        <span class="text-gray-400 text-xs">-</span>
+                                                    `}
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Action Buttons -->
+                    <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                        <a href="edit_client.php?id=${client.id}" 
+                           class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="fas fa-edit mr-2"></i> Edit Rates
+                        </a>
+                        <button onclick="exportClientRates(${client.id}, '${client.client_name}')" 
+                                class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                            <i class="fas fa-download mr-2"></i> Export
+                        </button>
+                    </div>
+                `}
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Add click outside to close
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+// Helper functions for styling and formatting
+function getMovementTypeBadgeClass(movementType) {
+    const classes = {
+        'export': 'bg-blue-100 text-blue-800',
+        'import': 'bg-green-100 text-green-800',
+        'domestic': 'bg-yellow-100 text-yellow-800',
+        'local': 'bg-gray-100 text-gray-800'
+    };
+    return classes[movementType] || 'bg-gray-100 text-gray-800';
+}
+
+function getContainerTypeBadgeClass(containerType) {
+    const classes = {
+        'full': 'bg-purple-100 text-purple-800',
+        'empty': 'bg-orange-100 text-orange-800'
+    };
+    return classes[containerType] || 'bg-gray-100 text-gray-800';
+}
+
+function capitalizeFirst(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function formatDate(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-IN', { 
+        day: '2-digit', 
+        month: 'short', 
+        year: 'numeric' 
+    });
+}
+
+// Export function for client rates
+function exportClientRates(clientId, clientName) {
+    const exportUrl = `export_client_rates.php?client_id=${clientId}&format=csv`;
+    const link = document.createElement('a');
+    link.href = exportUrl;
+    link.download = `${clientName.replace(/[^a-zA-Z0-9]/g, '_')}_rates.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
 
             // Status update modal functions
             function updateClientStatus(clientId, currentStatus) {

@@ -110,10 +110,86 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $pdo->prepare("UPDATE clients SET client_code = ? WHERE id = ?")
              ->execute([$client_code, $client_id]);
         
-        // Rest of your rate processing code...
-        
-        $pdo->commit();
-        $success = "Client registered successfully! Client Code: " . $client_code;
+         
+        // Handle contractual rates for 20ft containers
+if (isset($_POST['rates_20ft']) && is_array($_POST['rates_20ft'])) {
+    foreach ($_POST['rates_20ft'] as $index => $rate_data) {
+        // Check if this rate entry has required data
+        if (!empty($rate_data['movement_type']) && !empty($rate_data['rate'])) {
+            $movement_type = trim($rate_data['movement_type']);
+            $container_type = $rate_data['container_type'] ?? '';
+            $container_category = $rate_data['container_category'] ?? '';
+            $rate = (float)$rate_data['rate'];
+            $remarks = trim($rate_data['remarks'] ?? '');
+            $from_location = trim($rate_data['from_location'] ?? '');
+            $to_location = trim($rate_data['to_location'] ?? '');
+            $effective_from = !empty($rate_data['effective_from']) ? $rate_data['effective_from'] : null;
+            $effective_to = !empty($rate_data['effective_to']) ? $rate_data['effective_to'] : null;
+            
+            $rateStmt = $pdo->prepare("
+                INSERT INTO client_rates 
+                (client_id, container_size, movement_type, container_type, container_category, 
+                 rate, from_location, to_location, remarks, effective_from, 
+                 effective_to, is_active, created_at) 
+                VALUES (?, '20ft', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())
+            ");
+            $rateStmt->execute([
+                $client_id, 
+                $movement_type, 
+                $container_type, 
+                $container_category, 
+                $rate, 
+                $from_location, 
+                $to_location, 
+                $remarks,
+                $effective_from, 
+                $effective_to
+            ]);
+        }
+    }
+}
+
+// CORRECTED: Handle contractual rates for 40ft containers
+if (isset($_POST['rates_40ft']) && is_array($_POST['rates_40ft'])) {
+    foreach ($_POST['rates_40ft'] as $index => $rate_data) {
+        // Check if this rate entry has required data
+        if (!empty($rate_data['movement_type']) && !empty($rate_data['rate'])) {
+            $movement_type = trim($rate_data['movement_type']);
+            $container_type = $rate_data['container_type'] ?? '';
+            $container_category = $rate_data['container_category'] ?? '';
+            $rate = (float)$rate_data['rate'];
+            $remarks = trim($rate_data['remarks'] ?? '');
+            $from_location = trim($rate_data['from_location'] ?? '');
+            $to_location = trim($rate_data['to_location'] ?? '');
+            $effective_from = !empty($rate_data['effective_from']) ? $rate_data['effective_from'] : null;
+            $effective_to = !empty($rate_data['effective_to']) ? $rate_data['effective_to'] : null;
+            
+            $rateStmt = $pdo->prepare("
+                INSERT INTO client_rates 
+                (client_id, container_size, movement_type, container_type, container_category, 
+                  rate, from_location, to_location, remarks, effective_from, 
+                 effective_to, is_active, created_at) 
+                VALUES (?, '40ft', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())
+            ");
+            $rateStmt->execute([
+                $client_id, 
+                $movement_type, 
+                $container_type, 
+                $container_category, 
+                $rate, 
+                $from_location, 
+                $to_location, 
+                $remarks,
+                $effective_from, 
+                $effective_to
+            ]);
+        }
+    }
+}		
+
+$pdo->commit();
+$success = "Client registered successfully! Client Code: " . $client_code;
+
         
     } catch (Exception $e) {
         $pdo->rollBack();
@@ -741,10 +817,9 @@ function addRate20ft() {
                 <label class="block text-xs font-medium text-gray-700 mb-1">Movement Type *</label>
                 <select name="rates_20ft[${rate20ftCount}][movement_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="handleMovementTypeChange(this)">
                     <option value="">Select Movement</option>
-                    <option value="export">Export</option>
-                    <option value="import">Import</option>
-                    <option value="domestic">Domestic</option>
-                    <option value="local">Local</option>
+                   
+                    <option value="domestic">Domestic Long Distance</option>
+                    <option value="local">Local Port Movement/Yard Movement</option>
                 </select>
             </div>
 
@@ -753,8 +828,16 @@ function addRate20ft() {
                 <label class="block text-xs font-medium text-gray-700 mb-1">Container Type *</label>
                 <select name="rates_20ft[${rate20ftCount}][container_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                     <option value="">Select Type</option>
-                    <option value="full">Full Container</option>
+                    <option value="full">Loaded Container</option>
                     <option value="empty">Empty Container</option>
+                </select>
+            </div>
+			<div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Container Category *</label>
+                <select name="rates_20ft[${rate20ftCount}][container_category]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">Select Type</option>
+                    <option value="import">Import</option>
+                    <option value="export">Export</option>
                 </select>
             </div>
 
@@ -870,10 +953,9 @@ function addRate40ft() {
                 <label class="block text-xs font-medium text-gray-700 mb-1">Movement Type *</label>
                 <select name="rates_40ft[${rate40ftCount}][movement_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500" onchange="handleMovementTypeChange(this)">
                     <option value="">Select Movement</option>
-                    <option value="export">Export</option>
-                    <option value="import">Import</option>
-                    <option value="domestic">Domestic</option>
-                    <option value="local">Local</option>
+                    
+                    <option value="domestic">Domestic Long Distance</option>
+                    <option value="local">Local Port Movement/Yard Movement</option>
                 </select>
             </div>
 
@@ -882,8 +964,17 @@ function addRate40ft() {
                 <label class="block text-xs font-medium text-gray-700 mb-1">Container Type *</label>
                 <select name="rates_40ft[${rate40ftCount}][container_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500">
                     <option value="">Select Type</option>
-                    <option value="full">Full Container</option>
+                    <option value="full">Loaded Container</option>
                     <option value="empty">Empty Container</option>
+                </select>
+            </div>
+			
+			<div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Container Category *</label>
+                <select name="rates_40ft[${rate40ftCount}][container_category]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    <option value="">Select Type</option>
+                    <option value="import">Import</option>
+                    <option value="export">Export</option>
                 </select>
             </div>
 
@@ -1119,7 +1210,7 @@ function handleMovementTypeChange(selectElement) {
     const movementType = selectElement.value;
     
     // Show location requirement for long distance movements
-    const requiresLocation = ['export', 'import', 'domestic'].includes(movementType);
+    const requiresLocation = ['domestic'].includes(movementType);
     
     locationRequired.forEach(span => {
         span.style.display = requiresLocation ? 'inline' : 'none';
@@ -1322,7 +1413,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 if (movementType && containerType && rate) {
                     // Check location requirement for long distance movements
-                    if (['export', 'import', 'domestic'].includes(movementType)) {
+                    if (['domestic'].includes(movementType)) {
                         if (!fromLocation.trim() || !toLocation.trim()) {
                             e.preventDefault();
                             alert(`From and To locations are mandatory for ${movementType} movements.`);

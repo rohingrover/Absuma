@@ -649,26 +649,41 @@ $stats = $pdo->query("
             </div>
 
             <!-- Vendor Vehicles Modal -->
-            <div class="modal-overlay" id="vendorVehiclesModal" style="display: none !important;">
-                <div class="modal-container" onclick="event.stopPropagation()">
-                    <div class="p-6">
-                        <div class="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
-                            <h3 class="text-xl font-semibold text-gray-900 flex items-center gap-2">
-                                <i class="fas fa-truck text-blue-600"></i>
-                                Vendor Vehicles
-                            </h3>
-                            <button type="button" class="text-gray-400 hover:text-gray-600 p-2 rounded-full hover:bg-gray-100 transition-colors" onclick="hideVendorVehiclesModal()">
-                                <i class="fas fa-times text-lg"></i>
-                            </button>
-                        </div>
-                        
-                        <!-- Vehicles List -->
-                        <div id="vendorVehiclesList">
-                            <!-- Content loaded dynamically -->
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div id="vendorVehiclesModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" style="display: none;">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-5xl shadow-lg rounded-md bg-white">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-bold text-gray-900" id="vendorVehiclesTitle">
+                <i class="fas fa-truck text-blue-600 mr-2"></i>
+                Vendor Vehicles
+            </h3>
+            <button onclick="hideVendorVehiclesModal()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
+        
+        <!-- Summary Cards -->
+        <div id="vehiclesSummary" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <!-- Summary cards will be populated here -->
+        </div>
+        
+        <!-- Loading State -->
+        <div id="vehiclesLoading" class="text-center py-8">
+            <i class="fas fa-spinner fa-spin text-2xl text-blue-600"></i>
+            <p class="mt-2 text-gray-600">Loading vehicles...</p>
+        </div>
+        
+        <!-- Vehicles List -->
+        <div id="vendorVehiclesList" class="space-y-4">
+            <!-- Vehicles will be populated here -->
+        </div>
+        
+        <!-- No Vehicles Message -->
+        <div id="noVehiclesMessage" class="text-center py-8 hidden">
+            <i class="fas fa-truck text-4xl text-gray-300 mb-4"></i>
+            <p class="text-gray-500 text-lg">No vehicles registered yet</p>
+        </div>
+    </div>
+</div>
         </div>
 
         <script>
@@ -822,89 +837,206 @@ $stats = $pdo->query("
                 return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
             }
 
-            // Vendor vehicles modal functions
-            function viewVendorVehicles(vendorId) {
-                const modal = document.getElementById('vendorVehiclesModal');
-                
-                // Show modal with animation
-                modal.style.display = 'flex';
-                modal.style.visibility = 'visible';
-                modal.style.opacity = '0';
-                
-                setTimeout(() => {
-                    modal.classList.add('active');
-                    modal.style.opacity = '1';
-                }, 10);
-                
-                document.body.classList.add('modal-open');
-                loadVendorVehicles(vendorId);
+           let currentVendorId = null;
+
+// Main function to show vendor vehicles modal
+function viewVendorVehicles(vendorId) {
+    currentVendorId = vendorId;
+    const modal = document.getElementById('vendorVehiclesModal');
+    
+    // Show modal
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    
+    // Show loading state
+    showLoadingState();
+    
+    // Load vehicles
+    loadVendorVehicles(vendorId);
+}
+
+function hideVendorVehiclesModal() {
+    const modal = document.getElementById('vendorVehiclesModal');
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+    currentVendorId = null;
+}
+
+function showLoadingState() {
+    document.getElementById('vehiclesLoading').style.display = 'block';
+    document.getElementById('vendorVehiclesList').style.display = 'none';
+    document.getElementById('noVehiclesMessage').style.display = 'none';
+    document.getElementById('vehiclesSummary').innerHTML = '';
+}
+
+function hideLoadingState() {
+    document.getElementById('vehiclesLoading').style.display = 'none';
+}
+
+function loadVendorVehicles(vendorId) {
+    fetch(`get_vendor_vehicles.php?vendor_id=${vendorId}`)
+        .then(response => response.json())
+        .then(data => {
+            hideLoadingState();
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to load vehicles');
             }
+            
+            // Update modal title
+            document.getElementById('vendorVehiclesTitle').innerHTML = `
+                <i class="fas fa-truck text-blue-600 mr-2"></i>
+                ${data.summary.vendor_info.name} - Vehicles (${data.summary.total_vehicles})
+            `;
+            
+            // Display summary and vehicles
+            displaySummary(data.summary);
+            displayVehicles(data.vehicles);
+            
+        })
+        .catch(error => {
+            hideLoadingState();
+            console.error('Error loading vendor vehicles:', error);
+            document.getElementById('vendorVehiclesList').innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-exclamation-triangle text-4xl text-red-400 mb-4"></i>
+                    <p class="text-red-600 text-lg">Error loading vehicles</p>
+                    <p class="text-gray-500 text-sm">${error.message}</p>
+                    <button onclick="loadVendorVehicles(${vendorId})" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                        <i class="fas fa-refresh mr-1"></i> Retry
+                    </button>
+                </div>
+            `;
+            document.getElementById('vendorVehiclesList').style.display = 'block';
+        });
+}
 
-            function hideVendorVehiclesModal() {
-                const modal = document.getElementById('vendorVehiclesModal');
-                
-                // Hide modal with animation
-                modal.classList.remove('active');
-                modal.style.opacity = '0';
-                
-                setTimeout(() => {
-                    modal.style.display = 'none';
-                    modal.style.visibility = 'hidden';
-                }, 300);
-                
-                document.body.classList.remove('modal-open');
-            }
+function displaySummary(summary) {
+    const summaryHtml = `
+        <div class="bg-blue-50 p-4 rounded-lg text-center">
+            <div class="text-2xl font-bold text-blue-600">${summary.total_vehicles}</div>
+            <div class="text-sm text-blue-800">Total</div>
+        </div>
+        <div class="bg-green-50 p-4 rounded-lg text-center">
+            <div class="text-2xl font-bold text-green-600">${summary.active_vehicles}</div>
+            <div class="text-sm text-green-800">Available</div>
+        </div>
+        <div class="bg-yellow-50 p-4 rounded-lg text-center">
+            <div class="text-2xl font-bold text-yellow-600">${summary.on_trip_vehicles}</div>
+            <div class="text-sm text-yellow-800">On Trip</div>
+        </div>
+        <div class="bg-purple-50 p-4 rounded-lg text-center">
+            <div class="text-2xl font-bold text-purple-600">₹${(summary.total_revenue_30_days / 100000).toFixed(1)}L</div>
+            <div class="text-sm text-purple-800">30d Revenue</div>
+        </div>
+    `;
+    
+    document.getElementById('vehiclesSummary').innerHTML = summaryHtml;
+}
 
-            function loadVendorVehicles(vendorId) {
-                fetch(`get_vendor_vehicles.php?vendor_id=${vendorId}`)
-                    .then(response => response.json())
-                    .then(vehicles => {
-                        displayVendorVehicles(vehicles);
-                    })
-                    .catch(error => {
-                        console.error('Error loading vendor vehicles:', error);
-                        document.getElementById('vendorVehiclesList').innerHTML = '<p class="text-red-600">Error loading vehicles</p>';
-                    });
-            }
-
-            function displayVendorVehicles(vehicles) {
-                const container = document.getElementById('vendorVehiclesList');
-                
-                if (vehicles.length === 0) {
-                    container.innerHTML = '<p class="text-gray-500 text-center py-4">No vehicles registered yet</p>';
-                    return;
-                }
-
-                const html = vehicles.map(vehicle => {
-                    const statusBadge = `<span class="badge badge-${vehicle.status}">${vehicle.status.charAt(0).toUpperCase() + vehicle.status.slice(1)}</span>`;
-                    
-                    return `
-                        <div class="border border-gray-200 rounded-lg p-4 bg-white mb-3">
-                            <div class="flex items-center justify-between mb-2">
-                                <h5 class="font-medium text-gray-900 flex items-center gap-2">
-                                    <i class="fas fa-truck text-blue-600"></i>
-                                    ${vehicle.vehicle_number}
-                                </h5>
-                                ${statusBadge}
-                            </div>
-                            <div class="grid grid-cols-2 gap-4 text-sm">
-                                <div>
-                                    <p class="text-gray-600"><strong>Type:</strong> ${vehicle.vehicle_type || 'N/A'}</p>
-                                    <p class="text-gray-600"><strong>Make/Model:</strong> ${vehicle.make_model || 'N/A'}</p>
-                                    <p class="text-gray-600"><strong>Year:</strong> ${vehicle.manufacturing_year || 'N/A'}</p>
-                                </div>
-                                <div>
-                                    <p class="text-gray-600"><strong>Driver:</strong> ${vehicle.driver_name || 'N/A'}</p>
-                                    <p class="text-gray-600"><strong>GVW:</strong> ${vehicle.gvw ? vehicle.gvw + ' kg' : 'N/A'}</p>
-                                    <p class="text-gray-600"><strong>Added:</strong> ${new Date(vehicle.created_at).toLocaleDateString()}</p>
-                                </div>
-                            </div>
+function displayVehicles(vehicles) {
+    const container = document.getElementById('vendorVehiclesList');
+    
+    if (vehicles.length === 0) {
+        document.getElementById('noVehiclesMessage').style.display = 'block';
+        container.style.display = 'none';
+        return;
+    }
+    
+    document.getElementById('noVehiclesMessage').style.display = 'none';
+    container.style.display = 'block';
+    
+    const html = vehicles.map(vehicle => {
+        const statusBadge = getStatusBadge(vehicle.operational_status);
+        
+        return `
+            <div class="border border-gray-200 rounded-lg bg-white p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-3">
+                        <i class="fas fa-truck text-2xl text-blue-600"></i>
+                        <div>
+                            <h4 class="font-semibold text-lg text-gray-900">${vehicle.vehicle_number}</h4>
+                            <p class="text-sm text-gray-600">${vehicle.make_model}</p>
                         </div>
-                    `;
-                }).join('');
+                    </div>
+                    <div class="text-right">
+                        ${statusBadge}
+                        <div class="text-xs text-gray-500 mt-1">
+                            ${vehicle.total_trips} total trips
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div class="space-y-1">
+                        <h5 class="font-medium text-gray-700">Vehicle Info</h5>
+                        <div><span class="text-gray-600">Make:</span> ${vehicle.make || 'N/A'}</div>
+                        <div><span class="text-gray-600">Model:</span> ${vehicle.model || 'N/A'}</div>
+                        <div><span class="text-gray-600">Status:</span> 
+                            <span class="capitalize ${getStatusTextColor(vehicle.status)}">${vehicle.status}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-1">
+                        <h5 class="font-medium text-gray-700">Driver & Trips</h5>
+                        <div><span class="text-gray-600">Driver:</span> ${vehicle.driver_name || 'Not assigned'}</div>
+                        <div><span class="text-gray-600">License:</span> ${vehicle.driver_license || 'N/A'}</div>
+                        <div><span class="text-gray-600">Completed:</span> <span class="font-medium text-green-600">${vehicle.completed_trips}</span></div>
+                        <div><span class="text-gray-600">Active:</span> <span class="font-medium text-blue-600">${vehicle.active_trips}</span></div>
+                    </div>
+                    
+                    <div class="space-y-1">
+                        <h5 class="font-medium text-gray-700">Performance</h5>
+                        <div><span class="text-gray-600">Last Trip:</span> ${vehicle.last_trip_formatted}</div>
+                        <div><span class="text-gray-600">Utilization:</span> ${vehicle.utilization_rate}%</div>
+                        <div><span class="text-gray-600">30d Revenue:</span> <span class="font-medium">${vehicle.revenue_30_days_formatted}</span></div>
+                        ${vehicle.days_since_last_trip !== null ? 
+                            `<div><span class="text-gray-600">Idle:</span> ${vehicle.days_since_last_trip} days</div>` : ''
+                        }
+                    </div>
+                </div>
+                
+                <div class="mt-3 pt-3 border-t border-gray-200 flex justify-between items-center">
+                    <div class="text-xs text-gray-500">
+                        Added: ${vehicle.created_at_formatted}
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="viewVehicleDetails(${vehicle.id})" 
+                                class="text-xs px-3 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200">
+                            <i class="fas fa-eye mr-1"></i> Details
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    container.innerHTML = html;
+}
 
-                container.innerHTML = html;
-            }
+function getStatusBadge(status) {
+    const badges = {
+        available: '<span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">Available</span>',
+        on_trip: '<span class="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">On Trip</span>',
+        maintenance: '<span class="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">Maintenance</span>',
+        inactive: '<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full">Inactive</span>'
+    };
+    return badges[status] || badges.inactive;
+}
+
+function getStatusTextColor(status) {
+    const colors = {
+        'active': 'text-green-600',
+        'inactive': 'text-gray-600',
+        'maintenance': 'text-yellow-600'
+    };
+    return colors[status] || 'text-gray-600';
+}
+
+function viewVehicleDetails(vehicleId) {
+    // This function can be implemented to show detailed vehicle information
+    alert(`View details for vehicle ID: ${vehicleId}`);
+}
 
             // Vendor approval functions
             function approveVendor(vendorId) {
