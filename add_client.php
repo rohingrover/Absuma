@@ -340,49 +340,61 @@ $formData = [
 
                         <!-- Contractual Rates for 20ft Containers -->
                         <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-6 card-hover-effect">
-                            <div class="p-6">
-                                <div class="flex justify-between items-center mb-6">
-                                    <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                                        <i class="fas fa-shipping-fast text-blue-600"></i> Contractual Rates - 20ft Containers
-                                    </h2>
-                                    <button type="button" id="add20ftRate" class="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                                        <i class="fas fa-plus mr-2"></i> Add Rate
-                                    </button>
-                                </div>
-                                
-                                <div class="bg-blue-50 border-l-4 border-blue-500 text-blue-700 p-4 mb-6 rounded-lg">
-                                    <div class="flex items-center gap-2">
-                                        <i class="fas fa-info-circle text-blue-600"></i>
-                                        <div>
-                                            <p class="font-medium">Rate Configuration Guide</p>
-                                            <p class="text-sm">Configure different rates for various movement types, container types (Empty/Loaded), and directions (Import/Export).</p>
-                                        </div>
-                                    </div>
-                                </div>
+    <div class="p-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-6 flex items-center gap-2">
+            <i class="fas fa-money-bill-wave text-green-600"></i> Rate Configuration
+            <span class="text-sm font-normal text-gray-500 ml-2">(Optional - Add rates only for container sizes you work with)</span>
+        </h2>
 
-                                <div id="rates20ftContainer">
-                                    <!-- Rate rows will be added dynamically -->
-                                </div>
-                            </div>
-                        </div>
+        <!-- Container Size Selection -->
+        <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 class="text-md font-medium text-gray-700 mb-3">Select Container Sizes</h3>
+            <div class="flex gap-4">
+                <label class="flex items-center">
+                    <input type="checkbox" id="enable20ft" class="mr-2 text-blue-600 focus:ring-blue-500" onchange="toggleContainerSection('20ft')">
+                    <span class="text-sm font-medium">20ft Containers</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="checkbox" id="enable40ft" class="mr-2 text-blue-600 focus:ring-blue-500" onchange="toggleContainerSection('40ft')">
+                    <span class="text-sm font-medium">40ft Containers</span>
+                </label>
+            </div>
+            <p class="text-xs text-gray-600 mt-2">Select only the container sizes this client works with</p>
+        </div>
 
-                        <!-- Contractual Rates for 40ft Containers -->
-                        <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-6 card-hover-effect">
-                            <div class="p-6">
-                                <div class="flex justify-between items-center mb-6">
-                                    <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                                        <i class="fas fa-truck text-blue-600"></i> Contractual Rates - 40ft Containers
-                                    </h2>
-                                    <button type="button" id="add40ftRate" class="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
-                                        <i class="fas fa-plus mr-2"></i> Add Rate
-                                    </button>
-                                </div>
+        <!-- 20ft Container Rates Section -->
+        <div id="rates20ftSection" class="rate-section mb-6" style="display: none;">
+            <div class="flex justify-between items-center mb-4 p-3 bg-blue-50 rounded-lg">
+                <h3 class="text-md font-semibold text-blue-800">20ft Container Rates</h3>
+                <button type="button" id="add20ftRate" class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-blue-600 hover:bg-blue-700 focus:outline-none">
+                    <i class="fas fa-plus mr-1"></i> Add Rate
+                </button>
+            </div>
+            <div id="rates20ftContainer" class="space-y-4">
+                <!-- Rates will be added dynamically -->
+            </div>
+        </div>
 
-                                <div id="rates40ftContainer">
-                                    <!-- Rate rows will be added dynamically -->
-                                </div>
-                            </div>
-                        </div>
+        <!-- 40ft Container Rates Section -->
+        <div id="rates40ftSection" class="rate-section mb-6" style="display: none;">
+            <div class="flex justify-between items-center mb-4 p-3 bg-green-50 rounded-lg">
+                <h3 class="text-md font-semibold text-green-800">40ft Container Rates</h3>
+                <button type="button" id="add40ftRate" class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700 focus:outline-none">
+                    <i class="fas fa-plus mr-1"></i> Add Rate
+                </button>
+            </div>
+            <div id="rates40ftContainer" class="space-y-4">
+                <!-- Rates will be added dynamically -->
+            </div>
+        </div>
+
+        <div class="text-sm text-gray-600 bg-yellow-50 p-3 rounded-lg">
+            <i class="fas fa-info-circle text-yellow-600 mr-1"></i>
+            <strong>Note:</strong> For Long Distance movements, From and To locations are mandatory. 
+            Local movements within the same city may not require specific locations.
+        </div>
+    </div>
+</div>
 
                         <!-- Form Actions -->
                         <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-6 card-hover-effect">
