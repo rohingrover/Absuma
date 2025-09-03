@@ -184,6 +184,25 @@ $formData = [
         .remove-rate {
             @apply text-red-600 hover:text-red-800 cursor-pointer p-1 rounded hover:bg-red-100;
         }
+		.bg-blue-25 {
+		background-color: rgba(59, 130, 246, 0.05);
+		}
+
+		.bg-green-25 {
+			background-color: rgba(34, 197, 94, 0.05);
+		}
+
+		.location-field {
+			transition: opacity 0.3s ease;
+		}
+
+		.rate-row {
+			transition: all 0.3s ease;
+		}
+
+		.rate-row:hover {
+			box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+		}
     </style>
 </head>
 <body class="bg-gray-50">
@@ -415,62 +434,118 @@ $formData = [
         </div>
     </div>
 
-    <script>
-      // Rate management for 20ft containers
+   <script>
+// Updated JavaScript for flexible rate management with locations
 let rate20ftCount = 0;
+let rate40ftCount = 0;
 
+// Toggle container size sections
+function toggleContainerSection(containerSize) {
+    const checkbox = document.getElementById(`enable${containerSize}`);
+    const section = document.getElementById(`rates${containerSize}Section`);
+    const container = document.getElementById(`rates${containerSize}Container`);
+    
+    if (checkbox.checked) {
+        section.style.display = 'block';
+        // Add initial rate row if none exists
+        if (container.children.length === 0) {
+            if (containerSize === '20ft') {
+                addRate20ft();
+            } else {
+                addRate40ft();
+            }
+        }
+    } else {
+        section.style.display = 'none';
+        // Clear all rates for this container size
+        container.innerHTML = '';
+        if (containerSize === '20ft') {
+            rate20ftCount = 0;
+        } else {
+            rate40ftCount = 0;
+        }
+    }
+}
+
+// Add 20ft rate row
 function addRate20ft() {
     rate20ftCount++;
     const container = document.getElementById('rates20ftContainer');
     const rateRow = document.createElement('div');
-    rateRow.className = 'rate-row';
+    rateRow.className = 'rate-row p-4 border border-blue-200 rounded-lg bg-blue-25';
     rateRow.innerHTML = `
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Movement Type</label>
-            <select name="movement_types_20ft[]" required class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Select Type</option>
-                <option value="Port Movement">Port Movement</option>
-                <option value="Import Movement">Import Movement</option>
-                <option value="Export Movement">Export Movement</option>
-                <option value="Local Transportation">Local Transportation</option>
-                <option value="Long Distance">Long Distance</option>
-                <option value="Warehouse to Port">Warehouse to Port</option>
-                <option value="Port to Warehouse">Port to Warehouse</option>
-                <option value="Custom Movement">Custom Movement</option>
-            </select>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <!-- Movement Type -->
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Movement Type *</label>
+                <select name="rates_20ft[${rate20ftCount}][movement_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500" onchange="handleMovementTypeChange(this)">
+                    <option value="">Select Movement</option>
+                    <option value="export">Export</option>
+                    <option value="import">Import</option>
+                    <option value="domestic">Port Movement</option>
+                    <option value="local">Long Distance</option>
+                </select>
+            </div>
+
+            <!-- Container Type -->
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Container Type *</label>
+                <select name="rates_20ft[${rate20ftCount}][container_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">Select Type</option>
+                    <option value="full">Full Container</option>
+                    <option value="empty">Empty Container</option>
+                </select>
+            </div>
+
+            <!-- From Location -->
+            <div class="location-field">
+                <label class="block text-xs font-medium text-gray-700 mb-1">From Location <span class="location-required text-red-500" style="display: none;">*</span></label>
+                <input type="text" name="rates_20ft[${rate20ftCount}][from_location]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 location-input"
+                       placeholder="e.g., Mumbai Port, JNPT">
+            </div>
+
+            <!-- To Location -->
+            <div class="location-field">
+                <label class="block text-xs font-medium text-gray-700 mb-1">To Location <span class="location-required text-red-500" style="display: none;">*</span></label>
+                <input type="text" name="rates_20ft[${rate20ftCount}][to_location]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 location-input"
+                       placeholder="e.g., Pune, Nashik">
+            </div>
+
+            <!-- Rate -->
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Rate (₹) *</label>
+                <input type="number" name="rates_20ft[${rate20ftCount}][rate]" required min="0" step="0.01"
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                       placeholder="Enter rate">
+            </div>
         </div>
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Container Type</label>
-            <select name="container_types_20ft[]" required class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Select Type</option>
-                <option value="Empty">Empty</option>
-                <option value="Loaded">Loaded</option>
-            </select>
+
+        <!-- Additional Details Row -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Effective From</label>
+                <input type="date" name="rates_20ft[${rate20ftCount}][effective_from]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Effective To</label>
+                <input type="date" name="rates_20ft[${rate20ftCount}][effective_to]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
         </div>
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Direction</label>
-            <select name="import_export_20ft[]" required class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Select Direction</option>
-                <option value="Import">Import</option>
-                <option value="Export">Export</option>
-                <option value="Domestic">Domestic</option>
-            </select>
-        </div>
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Rate (₹)</label>
-            <input type="number" name="rates_20ft[]" step="0.01" min="0" required 
-                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                   placeholder="0.00">
-        </div>
-        <div class="col-span-3">
+
+        <div class="mt-4">
             <label class="block text-xs font-medium text-gray-700 mb-1">Remarks</label>
-            <input type="text" name="remarks_20ft[]" 
-                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                   placeholder="Optional notes">
+            <input type="text" name="rates_20ft[${rate20ftCount}][remarks]" 
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                   placeholder="Any additional notes about this rate">
         </div>
-        <div class="col-span-1 flex items-end">
-            <button type="button" class="remove-rate w-full" onclick="removeRate20ft(this)" ${rate20ftCount === 1 ? 'style="display: none;"' : ''}>
-                <i class="fas fa-trash"></i>
+
+        <div class="flex justify-end mt-4">
+            <button type="button" onclick="removeRate20ft(this)" class="remove-rate inline-flex items-center px-2 py-1 border border-red-300 text-xs font-medium rounded text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none" ${rate20ftCount === 1 ? 'style="display: none;"' : ''}>
+                <i class="fas fa-trash mr-1"></i> Remove
             </button>
         </div>
     `;
@@ -478,85 +553,147 @@ function addRate20ft() {
     toggleRemoveButtons20ft();
 }
 
+// Add 40ft rate row
+function addRate40ft() {
+    rate40ftCount++;
+    const container = document.getElementById('rates40ftContainer');
+    const rateRow = document.createElement('div');
+    rateRow.className = 'rate-row p-4 border border-green-200 rounded-lg bg-green-25';
+    rateRow.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            <!-- Movement Type -->
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Movement Type *</label>
+                <select name="rates_40ft[${rate40ftCount}][movement_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500" onchange="handleMovementTypeChange(this)">
+                    <option value="">Select Movement</option>
+                    <option value="export">Export</option>
+                    <option value="import">Import</option>
+                    <option value="domestic">Domestic</option>
+                    <option value="local">Local</option>
+                </select>
+            </div>
+
+            <!-- Container Type -->
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Container Type *</label>
+                <select name="rates_40ft[${rate40ftCount}][container_type]" required class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                    <option value="">Select Type</option>
+                    <option value="full">Full Container</option>
+                    <option value="empty">Empty Container</option>
+                </select>
+            </div>
+
+            <!-- From Location -->
+            <div class="location-field">
+                <label class="block text-xs font-medium text-gray-700 mb-1">From Location <span class="location-required text-red-500" style="display: none;">*</span></label>
+                <input type="text" name="rates_40ft[${rate40ftCount}][from_location]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500 location-input"
+                       placeholder="e.g., Mumbai Port, JNPT">
+            </div>
+
+            <!-- To Location -->
+            <div class="location-field">
+                <label class="block text-xs font-medium text-gray-700 mb-1">To Location <span class="location-required text-red-500" style="display: none;">*</span></label>
+                <input type="text" name="rates_40ft[${rate40ftCount}][to_location]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500 location-input"
+                       placeholder="e.g., Pune, Nashik">
+            </div>
+
+            <!-- Rate -->
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Rate (₹) *</label>
+                <input type="number" name="rates_40ft[${rate40ftCount}][rate]" required min="0" step="0.01"
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                       placeholder="Enter rate">
+            </div>
+        </div>
+
+        <!-- Additional Details Row -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Effective From</label>
+                <input type="date" name="rates_40ft[${rate40ftCount}][effective_from]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-700 mb-1">Effective To</label>
+                <input type="date" name="rates_40ft[${rate40ftCount}][effective_to]" 
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500">
+            </div>
+        </div>
+
+        <div class="mt-4">
+            <label class="block text-xs font-medium text-gray-700 mb-1">Remarks</label>
+            <input type="text" name="rates_40ft[${rate40ftCount}][remarks]" 
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                   placeholder="Any additional notes about this rate">
+        </div>
+
+        <div class="flex justify-end mt-4">
+            <button type="button" onclick="removeRate40ft(this)" class="remove-rate inline-flex items-center px-2 py-1 border border-red-300 text-xs font-medium rounded text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none" ${rate40ftCount === 1 ? 'style="display: none;"' : ''}>
+                <i class="fas fa-trash mr-1"></i> Remove
+            </button>
+        </div>
+    `;
+    container.appendChild(rateRow);
+    toggleRemoveButtons40ft();
+}
+
+// Handle movement type changes - show/hide location requirement
+function handleMovementTypeChange(selectElement) {
+    const rateRow = selectElement.closest('.rate-row');
+    const locationFields = rateRow.querySelectorAll('.location-field');
+    const locationInputs = rateRow.querySelectorAll('.location-input');
+    const locationRequired = rateRow.querySelectorAll('.location-required');
+    const movementType = selectElement.value;
+    
+    // Show location requirement for long distance movements
+    const requiresLocation = ['export', 'import', 'domestic'].includes(movementType);
+    
+    locationRequired.forEach(span => {
+        span.style.display = requiresLocation ? 'inline' : 'none';
+    });
+    
+    locationInputs.forEach(input => {
+        if (requiresLocation) {
+            input.setAttribute('required', '');
+            input.style.borderColor = '#d1d5db';
+        } else {
+            input.removeAttribute('required');
+            input.value = ''; // Clear location values for local movements
+            input.style.borderColor = '#d1d5db';
+        }
+    });
+    
+    // Add visual feedback
+    locationFields.forEach(field => {
+        if (requiresLocation) {
+            field.style.opacity = '1';
+        } else {
+            field.style.opacity = '0.6';
+        }
+    });
+}
+
+// Remove rate functions
 function removeRate20ft(button) {
     button.closest('.rate-row').remove();
     rate20ftCount--;
     toggleRemoveButtons20ft();
 }
 
+function removeRate40ft(button) {
+    button.closest('.rate-row').remove();
+    rate40ftCount--;
+    toggleRemoveButtons40ft();
+}
+
+// Toggle remove buttons visibility
 function toggleRemoveButtons20ft() {
     const removeButtons = document.querySelectorAll('#rates20ftContainer .remove-rate');
     removeButtons.forEach(button => {
         button.style.display = rate20ftCount > 1 ? 'block' : 'none';
     });
-}
-
-// Rate management for 40ft containers
-let rate40ftCount = 0;
-
-function addRate40ft() {
-    rate40ftCount++;
-    const container = document.getElementById('rates40ftContainer');
-    const rateRow = document.createElement('div');
-    rateRow.className = 'rate-row';
-    rateRow.innerHTML = `
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Movement Type</label>
-            <select name="movement_types_40ft[]" required class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Select Type</option>
-                <option value="Port Movement">Port Movement</option>
-                <option value="Import Movement">Import Movement</option>
-                <option value="Export Movement">Export Movement</option>
-                <option value="Local Transportation">Local Transportation</option>
-                <option value="Long Distance">Long Distance</option>
-                <option value="Warehouse to Port">Warehouse to Port</option>
-                <option value="Port to Warehouse">Port to Warehouse</option>
-                <option value="Custom Movement">Custom Movement</option>
-            </select>
-        </div>
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Container Type</label>
-            <select name="container_types_40ft[]" required class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Select Type</option>
-                <option value="Empty">Empty</option>
-                <option value="Loaded">Loaded</option>
-            </select>
-        </div>
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Direction</label>
-            <select name="import_export_40ft[]" required class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Select Direction</option>
-                <option value="Import">Import</option>
-                <option value="Export">Export</option>
-                <option value="Domestic">Domestic</option>
-            </select>
-        </div>
-        <div class="col-span-2">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Rate (₹)</label>
-            <input type="number" name="rates_40ft[]" step="0.01" min="0" required 
-                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                   placeholder="0.00">
-        </div>
-        <div class="col-span-3">
-            <label class="block text-xs font-medium text-gray-700 mb-1">Remarks</label>
-            <input type="text" name="remarks_40ft[]" 
-                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                   placeholder="Optional notes">
-        </div>
-        <div class="col-span-1 flex items-end">
-            <button type="button" class="remove-rate w-full" onclick="removeRate40ft(this)" ${rate40ftCount === 1 ? 'style="display: none;"' : ''}>
-                <i class="fas fa-trash"></i>
-            </button>
-        </div>
-    `;
-    container.appendChild(rateRow);
-    toggleRemoveButtons40ft();
-}
-
-function removeRate40ft(button) {
-    button.closest('.rate-row').remove();
-    rate40ftCount--;
-    toggleRemoveButtons40ft();
 }
 
 function toggleRemoveButtons40ft() {
@@ -566,105 +703,54 @@ function toggleRemoveButtons40ft() {
     });
 }
 
-// Event listeners and initialization
+// Form validation enhancement
 document.addEventListener('DOMContentLoaded', function() {
     // Add button listeners
     document.getElementById('add20ftRate').addEventListener('click', addRate20ft);
     document.getElementById('add40ftRate').addEventListener('click', addRate40ft);
 
-    // Initialize with one rate row for each container size
-    addRate20ft();
-    addRate40ft();
-
-    // PAN number formatting
-    const panInput = document.getElementById('pan_number');
-    if (panInput) {
-        panInput.addEventListener('input', function() {
-            this.value = this.value.toUpperCase();
-        });
-    }
-
-    // GST number formatting
-    const gstInput = document.getElementById('gst_number');
-    if (gstInput) {
-        gstInput.addEventListener('input', function() {
-            this.value = this.value.toUpperCase();
-        });
-    }
-
-    // Phone number validation
-    const phoneInput = document.getElementById('phone_number');
-    if (phoneInput) {
-        phoneInput.addEventListener('input', function() {
-            this.value = this.value.replace(/\D/g, '').substring(0, 10);
-        });
-    }
-});
-
-// Form validation
-document.addEventListener('DOMContentLoaded', function() {
+    // Enhanced form validation
     document.querySelector('form').addEventListener('submit', function(e) {
-        const pan = document.getElementById('pan_number').value.trim();
-        const gst = document.getElementById('gst_number').value.trim();
-        const phone = document.getElementById('phone_number').value.trim();
-
-        // PAN validation (if provided)
-        if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(pan)) {
-            e.preventDefault();
-            alert('Invalid PAN format. Should be like: ABCDE1234F');
-            return;
-        }
-
-        // GST validation (if provided)
-        if (gst && gst.length !== 15) {
-            e.preventDefault();
-            alert('GST number must be exactly 15 characters long');
-            return;
-        }
-
-        // Phone validation
-        if (!/^[0-9]{10}$/.test(phone)) {
-            e.preventDefault();
-            alert('Phone number must be exactly 10 digits');
-            return;
-        }
-
-        // Validate that at least one rate is configured
-        const rates20ft = document.querySelectorAll('input[name="rates_20ft[]"]');
-        const rates40ft = document.querySelectorAll('input[name="rates_40ft[]"]');
+        let hasValidRates = false;
         
-        let hasValidRate = false;
+        // Check if at least one container size is enabled and has valid rates
+        const enable20ft = document.getElementById('enable20ft').checked;
+        const enable40ft = document.getElementById('enable40ft').checked;
         
-        // Check 20ft rates
-        rates20ft.forEach(input => {
-            if (input.value && parseFloat(input.value) > 0) {
-                hasValidRate = true;
+        if (enable20ft || enable40ft) {
+            // Check for movement type and location validation
+            const allRateRows = document.querySelectorAll('.rate-row');
+            
+            for (let row of allRateRows) {
+                const movementType = row.querySelector('select[name*="movement_type"]').value;
+                const containerType = row.querySelector('select[name*="container_type"]').value;
+                const rate = row.querySelector('input[name*="rate"]').value;
+                const fromLocation = row.querySelector('input[name*="from_location"]').value;
+                const toLocation = row.querySelector('input[name*="to_location"]').value;
+                
+                if (movementType && containerType && rate) {
+                    // Check location requirement for long distance movements
+                    if (['export', 'import', 'domestic'].includes(movementType)) {
+                        if (!fromLocation.trim() || !toLocation.trim()) {
+                            e.preventDefault();
+                            alert(`From and To locations are mandatory for ${movementType} movements.`);
+                            return false;
+                        }
+                    }
+                    hasValidRates = true;
+                }
             }
-        });
+        }
         
-        // Check 40ft rates
-        rates40ft.forEach(input => {
-            if (input.value && parseFloat(input.value) > 0) {
-                hasValidRate = true;
-            }
-        });
-
-        if (!hasValidRate) {
-            e.preventDefault();
-            alert('Please configure at least one rate for either 20ft or 40ft containers');
-            return;
-        }
-
-        // Validate billing cycle
-        const billingCycle = document.getElementById('billing_cycle_days').value;
-        if (billingCycle < 1 || billingCycle > 365) {
-            e.preventDefault();
-            alert('Billing cycle must be between 1 and 365 days');
-            return;
-        }
+        // Optional: You can make rates completely optional
+        // if (!hasValidRates) {
+        //     e.preventDefault();
+        //     alert('Please add at least one valid rate configuration.');
+        //     return false;
+        // }
     });
 });
-    </script>
+</script>
 </body>
 </html>
 
