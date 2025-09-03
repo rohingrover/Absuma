@@ -288,11 +288,24 @@ $documentAlerts = getDocumentAlerts();
                                     <i class="fas fa-plus w-5 text-center text-absuma-red"></i> Register Vendor
                                 </a>
                                 <a href="manage_vendors.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-list w-5 text-center"></i> Manage Vendors
+                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Manage Vendors
                                 </a>
-                                <a href="dashboard.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium absuma-gradient text-white rounded-lg transition-all">
-                                    <i class="fas fa-tachometer-alt w-5 text-center"></i> Dashboard
+                               
+                            </nav>
+                        </div>
+						<div class="mb-6">
+                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Client Section</h3>
+                            <nav class="space-y-1">
+                                <a href="add_client.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
+                                    <i class="fas fa-plus w-5 text-center text-absuma-red"></i> Register Client
                                 </a>
+                                <a href="manage_clients.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
+                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Manage Clients
+                                </a>
+                                <a href="client_reports.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
+                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Client Reports
+                                </a>
+                               
                             </nav>
                         </div>
                     </div>
