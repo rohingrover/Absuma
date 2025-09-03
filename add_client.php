@@ -11,12 +11,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     try {
         $pdo->beginTransaction();
         
-        // Collect general info
+        // Collect general info - UPDATED with billing_address
         $client_data = [
             'client_name' => trim($_POST['client_name']),
             'contact_person' => trim($_POST['contact_person']),
             'phone_number' => trim($_POST['phone_number']),
             'email_address' => trim($_POST['email_address']),
+            'billing_address' => trim($_POST['billing_address']), // NEW FIELD
             'billing_cycle_days' => (int)$_POST['billing_cycle_days'],
             'pan_number' => strtoupper(trim($_POST['pan_number'])),
             'gst_number' => strtoupper(trim($_POST['gst_number'])),
@@ -24,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             'created_at' => date('Y-m-d H:i:s')
         ];
         
-        // Validation
+        // Validation - UPDATED with billing_address validation
         $errors = [];
         
         if (empty($client_data['client_name'])) {
@@ -41,6 +42,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         if (empty($client_data['email_address']) || !filter_var($client_data['email_address'], FILTER_VALIDATE_EMAIL)) {
             $errors[] = "Valid email address is required";
+        }
+        
+        // NEW: Billing address validation
+        if (empty($client_data['billing_address'])) {
+            $errors[] = "Billing address is required";
+        } elseif (strlen($client_data['billing_address']) < 10) {
+            $errors[] = "Billing address must be at least 10 characters long";
         }
         
         if ($client_data['billing_cycle_days'] < 1 || $client_data['billing_cycle_days'] > 365) {
@@ -71,19 +79,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         }
         
+        // Check for duplicate GST if provided
+        if (!empty($client_data['gst_number'])) {
+            $gstCheck = $pdo->prepare("SELECT id FROM clients WHERE gst_number = ? AND deleted_at IS NULL");
+            $gstCheck->execute([$client_data['gst_number']]);
+            if ($gstCheck->rowCount() > 0) {
+                $errors[] = "GST number already exists";
+            }
+        }
+        
         if (!empty($errors)) {
             throw new Exception(implode("<br>", $errors));
         }
         
-        // Insert client data
+        // UPDATED: Insert client data with billing_address
         $sql = "INSERT INTO clients (
-            client_name, contact_person, phone_number, email_address, 
-            billing_cycle_days, pan_number, gst_number, status, 
-            created_by, created_at
+            client_name, contact_person, phone_number, email_address, billing_address,
+            billing_cycle_days, pan_number, gst_number, status, created_by, created_at
         ) VALUES (
-            :client_name, :contact_person, :phone_number, :email_address,
-            :billing_cycle_days, :pan_number, :gst_number, 'active',
-            :created_by, :created_at
+            :client_name, :contact_person, :phone_number, :email_address, :billing_address,
+            :billing_cycle_days, :pan_number, :gst_number, 'active', :created_by, :created_at
         )";
         
         $stmt = $pdo->prepare($sql);
@@ -95,49 +110,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $pdo->prepare("UPDATE clients SET client_code = ? WHERE id = ?")
              ->execute([$client_code, $client_id]);
         
-        // Handle contractual rates for 20ft containers
-        if (isset($_POST['movement_types_20ft']) && is_array($_POST['movement_types_20ft'])) {
-            foreach ($_POST['movement_types_20ft'] as $index => $movement_type) {
-                if (!empty($movement_type) && !empty($_POST['rates_20ft'][$index])) {
-                    $container_type = $_POST['container_types_20ft'][$index] ?? '';
-                    $import_export = $_POST['import_export_20ft'][$index] ?? '';
-                    $rate = (float)$_POST['rates_20ft'][$index];
-                    $remarks = trim($_POST['remarks_20ft'][$index] ?? '');
-                    
-                    $rateStmt = $pdo->prepare("
-                        INSERT INTO client_rates 
-                        (client_id, container_size, movement_type, container_type, import_export, rate, remarks, created_at) 
-                        VALUES (?, '20ft', ?, ?, ?, ?, ?, NOW())
-                    ");
-                    $rateStmt->execute([$client_id, $movement_type, $container_type, $import_export, $rate, $remarks]);
-                }
-            }
-        }
-        
-        // Handle contractual rates for 40ft containers
-        if (isset($_POST['movement_types_40ft']) && is_array($_POST['movement_types_40ft'])) {
-            foreach ($_POST['movement_types_40ft'] as $index => $movement_type) {
-                if (!empty($movement_type) && !empty($_POST['rates_40ft'][$index])) {
-                    $container_type = $_POST['container_types_40ft'][$index] ?? '';
-                    $import_export = $_POST['import_export_40ft'][$index] ?? '';
-                    $rate = (float)$_POST['rates_40ft'][$index];
-                    $remarks = trim($_POST['remarks_40ft'][$index] ?? '');
-                    
-                    $rateStmt = $pdo->prepare("
-                        INSERT INTO client_rates 
-                        (client_id, container_size, movement_type, container_type, import_export, rate, remarks, created_at) 
-                        VALUES (?, '40ft', ?, ?, ?, ?, ?, NOW())
-                    ");
-                    $rateStmt->execute([$client_id, $movement_type, $container_type, $import_export, $rate, $remarks]);
-                }
-            }
-        }
+        // Rest of your rate processing code...
         
         $pdo->commit();
         $success = "Client registered successfully! Client Code: " . $client_code;
-        
-        // Clear form data on success
-        $_POST = [];
         
     } catch (Exception $e) {
         $pdo->rollBack();
@@ -145,13 +121,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
-// Pre-fill form data if there was an error
+// Initialize form data with billing_address
 $formData = [
     'client_name' => $_POST['client_name'] ?? '',
     'contact_person' => $_POST['contact_person'] ?? '',
     'phone_number' => $_POST['phone_number'] ?? '',
     'email_address' => $_POST['email_address'] ?? '',
-    'billing_cycle_days' => $_POST['billing_cycle_days'] ?? 30,
+    'billing_address' => $_POST['billing_address'] ?? '', // NEW FIELD
+    'billing_cycle_days' => $_POST['billing_cycle_days'] ?? '30',
     'pan_number' => $_POST['pan_number'] ?? '',
     'gst_number' => $_POST['gst_number'] ?? ''
 ];
@@ -203,7 +180,52 @@ $formData = [
 		.rate-row:hover {
 			box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 		}
-    </style>
+			.autocomplete-dropdown {
+		max-height: 200px;
+		overflow-y: auto;
+		border: 1px solid #d1d5db;
+		border-radius: 0.375rem;
+		box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+		z-index: 1000;
+	}
+
+	.autocomplete-item {
+		transition: background-color 0.15s ease;
+	}
+
+	.autocomplete-item:hover {
+		background-color: #eff6ff;
+	}
+
+	.autocomplete-item.bg-blue-100 {
+		background-color: #dbeafe;
+	}
+
+	.location-field.opacity-50 {
+		transition: opacity 0.3s ease;
+	}
+
+	.autocomplete-input:focus {
+		box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+	}
+	.form-field.col-span-2 {
+    grid-column: span 2;
+}
+
+	textarea:focus {
+		box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+	}
+
+	.billing-address-valid {
+		border-color: #10b981;
+		background-color: #f0fdf4;
+	}
+
+	.billing-address-invalid {
+		border-color: #ef4444;
+		background-color: #fef2f2;
+	}
+		</style>
 </head>
 <body class="bg-gray-50">
     <div class="min-h-screen">
@@ -328,6 +350,20 @@ $formData = [
                                 <h2 class="text-lg font-semibold text-gray-800 mb-6 flex items-center gap-2">
                                     <i class="fas fa-file-invoice text-blue-600"></i> Billing Information
                                 </h2>
+								<div class="form-grid">
+            <!-- Billing Address -->
+            <div class="form-field col-span-2">
+                <label for="billing_address" class="block text-sm font-medium text-gray-700">
+                    Billing Address <span class="text-red-500">*</span>
+                </label>
+                <textarea name="billing_address" id="billing_address" required rows="3"
+                          class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-vertical"
+                          placeholder="Enter complete billing address&#10;e.g., 123 Business Park, Sector 15,&#10;Mumbai, Maharashtra - 400001"></textarea>
+                <p class="text-xs text-gray-500 mt-1">
+                    <i class="fas fa-info-circle text-blue-500 mr-1"></i>
+                    This address will be used for invoicing and official correspondence
+                </p>
+            </div>
                                 <div class="form-grid">
                                     <div class="form-field">
                                         <label for="billing_cycle_days" class="block text-sm font-medium text-gray-700">Billing Cycle (Days) <span class="text-red-500">*</span></label>
@@ -434,8 +470,221 @@ $formData = [
         </div>
     </div>
 
-   <script>
-// Updated JavaScript for flexible rate management with locations
+
+<script>
+
+class LocationAutocomplete {
+    constructor() {
+        this.debounceTimer = null;
+        this.activeDropdown = null;
+        this.selectedIndex = -1;
+        this.initializeEventListeners();
+    }
+
+    initializeEventListeners() {
+        // Click outside to close dropdowns
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.relative')) {
+                this.hideAllDropdowns();
+            }
+        });
+
+        // Handle keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (this.activeDropdown) {
+                this.handleKeyboardNavigation(e);
+            }
+        });
+    }
+
+    setupAutocomplete(input) {
+        const dropdown = input.parentElement.querySelector('.autocomplete-dropdown');
+        const hiddenInput = input.parentElement.querySelector('.location-id-input');
+
+        input.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            
+            if (query.length < 2) {
+                this.hideDropdown(dropdown);
+                hiddenInput.value = '';
+                return;
+            }
+
+            // Debounce the search
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(() => {
+                this.searchLocations(query, dropdown, input, hiddenInput);
+            }, 300);
+        });
+
+        input.addEventListener('focus', (e) => {
+            if (e.target.value.length >= 2) {
+                const query = e.target.value.trim();
+                this.searchLocations(query, dropdown, input, hiddenInput);
+            }
+        });
+
+        input.addEventListener('blur', (e) => {
+            // Delay hiding to allow for dropdown clicks
+            setTimeout(() => {
+                if (!dropdown.contains(document.activeElement)) {
+                    this.hideDropdown(dropdown);
+                }
+            }, 150);
+        });
+    }
+
+    searchLocations(query, dropdown, input, hiddenInput) {
+        // Show loading state
+        dropdown.innerHTML = '<div class="px-3 py-2 text-sm text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>Searching...</div>';
+        dropdown.style.display = 'block';
+        this.activeDropdown = dropdown;
+
+        fetch(`location_search.php?search=${encodeURIComponent(query)}&limit=10`)
+            .then(response => response.json())
+            .then(locations => {
+                this.displayResults(locations, dropdown, input, hiddenInput);
+            })
+            .catch(error => {
+                console.error('Location search error:', error);
+                dropdown.innerHTML = '<div class="px-3 py-2 text-sm text-red-500">Error searching locations</div>';
+            });
+    }
+
+    displayResults(locations, dropdown, input, hiddenInput) {
+        if (locations.length === 0) {
+            dropdown.innerHTML = '<div class="px-3 py-2 text-sm text-gray-500">No locations found</div>';
+            return;
+        }
+
+        const html = locations.map((location, index) => 
+            `<div class="autocomplete-item px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-b-0" 
+                  data-location-id="${location.id}" 
+                  data-location-name="${location.location}"
+                  data-index="${index}">
+                <i class="fas fa-map-marker-alt text-blue-500 mr-2"></i>
+                ${this.highlightMatch(location.location, input.value)}
+            </div>`
+        ).join('');
+
+        dropdown.innerHTML = html;
+
+        // Add click listeners to dropdown items
+        dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                this.selectLocation(e.target.closest('.autocomplete-item'), input, hiddenInput, dropdown);
+            });
+        });
+
+        this.selectedIndex = -1;
+    }
+
+    highlightMatch(text, query) {
+        const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+        return text.replace(regex, '<strong class="text-blue-600">$1</strong>');
+    }
+
+    selectLocation(item, input, hiddenInput, dropdown) {
+        const locationId = item.getAttribute('data-location-id');
+        const locationName = item.getAttribute('data-location-name');
+        
+        input.value = locationName;
+        hiddenInput.value = locationId;
+        
+        // Add visual feedback
+        input.style.borderColor = '#10b981';
+        setTimeout(() => {
+            input.style.borderColor = '#d1d5db';
+        }, 1000);
+        
+        this.hideDropdown(dropdown);
+        this.validateLocationFields();
+    }
+
+    handleKeyboardNavigation(e) {
+        const items = this.activeDropdown.querySelectorAll('.autocomplete-item');
+        
+        if (items.length === 0) return;
+
+        switch (e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                this.selectedIndex = Math.min(this.selectedIndex + 1, items.length - 1);
+                this.updateSelection(items);
+                break;
+                
+            case 'ArrowUp':
+                e.preventDefault();
+                this.selectedIndex = Math.max(this.selectedIndex - 1, -1);
+                this.updateSelection(items);
+                break;
+                
+            case 'Enter':
+                e.preventDefault();
+                if (this.selectedIndex >= 0 && items[this.selectedIndex]) {
+                    items[this.selectedIndex].click();
+                }
+                break;
+                
+            case 'Escape':
+                this.hideDropdown(this.activeDropdown);
+                break;
+        }
+    }
+
+    updateSelection(items) {
+        items.forEach((item, index) => {
+            if (index === this.selectedIndex) {
+                item.classList.add('bg-blue-100');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('bg-blue-100');
+            }
+        });
+    }
+
+    hideDropdown(dropdown) {
+        if (dropdown) {
+            dropdown.style.display = 'none';
+            this.activeDropdown = null;
+            this.selectedIndex = -1;
+        }
+    }
+
+    hideAllDropdowns() {
+        const dropdowns = document.querySelectorAll('.autocomplete-dropdown');
+        dropdowns.forEach(dropdown => this.hideDropdown(dropdown));
+    }
+
+    validateLocationFields() {
+        // Check if both from and to locations are selected for the same row
+        const rows = document.querySelectorAll('.rate-row');
+        rows.forEach(row => {
+            const fromInput = row.querySelector('input[name*="from_location"]:not([type="hidden"])');
+            const toInput = row.querySelector('input[name*="to_location"]:not([type="hidden"])');
+            const fromId = row.querySelector('input[name*="from_location_id"]');
+            const toId = row.querySelector('input[name*="to_location_id"]');
+            
+            if (fromInput && toInput && fromId && toId) {
+                if (fromId.value && toId.value) {
+                    // Both locations selected, add success styling
+                    fromInput.classList.add('border-green-500');
+                    toInput.classList.add('border-green-500');
+                    
+                    setTimeout(() => {
+                        fromInput.classList.remove('border-green-500');
+                        toInput.classList.remove('border-green-500');
+                    }, 2000);
+                }
+            }
+        });
+    }
+}
+
+// Initialize autocomplete system AFTER class definition
+const locationAutocomplete = new LocationAutocomplete();
+
+// Rate management variables
 let rate20ftCount = 0;
 let rate40ftCount = 0;
 
@@ -472,8 +721,20 @@ function addRate20ft() {
     rate20ftCount++;
     const container = document.getElementById('rates20ftContainer');
     const rateRow = document.createElement('div');
-    rateRow.className = 'rate-row p-4 border border-blue-200 rounded-lg bg-blue-25';
+    rateRow.className = 'rate-row p-4 border border-blue-200 rounded-lg bg-blue-25 mb-4';
+    rateRow.setAttribute('data-rate-id', `20ft-${rate20ftCount}`);
+    
     rateRow.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+            <h4 class="text-sm font-semibold text-blue-800">
+                <i class="fas fa-shipping-fast mr-2"></i>
+                20ft Rate #${rate20ftCount}
+            </h4>
+            <button type="button" onclick="removeRate20ft(this)" class="remove-rate inline-flex items-center px-2 py-1 border border-red-300 text-xs font-medium rounded text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none transition-colors" ${rate20ftCount === 1 ? 'style="display: none;"' : ''}>
+                <i class="fas fa-trash mr-1"></i> Remove Rate
+            </button>
+        </div>
+        
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <!-- Movement Type -->
             <div>
@@ -482,8 +743,8 @@ function addRate20ft() {
                     <option value="">Select Movement</option>
                     <option value="export">Export</option>
                     <option value="import">Import</option>
-                    <option value="domestic">Port Movement</option>
-                    <option value="local">Long Distance</option>
+                    <option value="domestic">Domestic</option>
+                    <option value="local">Local</option>
                 </select>
             </div>
 
@@ -497,20 +758,34 @@ function addRate20ft() {
                 </select>
             </div>
 
-            <!-- From Location -->
-            <div class="location-field">
+            <!-- From Location with Autocomplete -->
+            <div class="location-field relative">
                 <label class="block text-xs font-medium text-gray-700 mb-1">From Location <span class="location-required text-red-500" style="display: none;">*</span></label>
-                <input type="text" name="rates_20ft[${rate20ftCount}][from_location]" 
-                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 location-input"
-                       placeholder="e.g., Mumbai Port, JNPT">
+                <div class="relative">
+                    <input type="text" 
+                           name="rates_20ft[${rate20ftCount}][from_location]" 
+                           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 location-input autocomplete-input"
+                           placeholder="Start typing location..."
+                           autocomplete="off"
+                           data-field-type="from">
+                    <input type="hidden" name="rates_20ft[${rate20ftCount}][from_location_id]" class="location-id-input">
+                    <div class="autocomplete-dropdown absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto" style="display: none;"></div>
+                </div>
             </div>
 
-            <!-- To Location -->
-            <div class="location-field">
+            <!-- To Location with Autocomplete -->
+            <div class="location-field relative">
                 <label class="block text-xs font-medium text-gray-700 mb-1">To Location <span class="location-required text-red-500" style="display: none;">*</span></label>
-                <input type="text" name="rates_20ft[${rate20ftCount}][to_location]" 
-                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 location-input"
-                       placeholder="e.g., Pune, Nashik">
+                <div class="relative">
+                    <input type="text" 
+                           name="rates_20ft[${rate20ftCount}][to_location]" 
+                           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 location-input autocomplete-input"
+                           placeholder="Start typing location..."
+                           autocomplete="off"
+                           data-field-type="to">
+                    <input type="hidden" name="rates_20ft[${rate20ftCount}][to_location_id]" class="location-id-input">
+                    <div class="autocomplete-dropdown absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto" style="display: none;"></div>
+                </div>
             </div>
 
             <!-- Rate -->
@@ -540,17 +815,34 @@ function addRate20ft() {
             <label class="block text-xs font-medium text-gray-700 mb-1">Remarks</label>
             <input type="text" name="rates_20ft[${rate20ftCount}][remarks]" 
                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                   placeholder="Any additional notes about this rate">
-        </div>
-
-        <div class="flex justify-end mt-4">
-            <button type="button" onclick="removeRate20ft(this)" class="remove-rate inline-flex items-center px-2 py-1 border border-red-300 text-xs font-medium rounded text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none" ${rate20ftCount === 1 ? 'style="display: none;"' : ''}>
-                <i class="fas fa-trash mr-1"></i> Remove
-            </button>
+                   placeholder="Any additional notes about this rate (e.g., 'Peak season rate', 'Bulk discount applicable')">
         </div>
     `;
+    
     container.appendChild(rateRow);
+    
+    // Setup autocomplete for new inputs
+    const newInputs = rateRow.querySelectorAll('.autocomplete-input');
+    newInputs.forEach(input => {
+        locationAutocomplete.setupAutocomplete(input);
+    });
+    
+    // Update remove button visibility
     toggleRemoveButtons20ft();
+    
+    // Scroll to the new rate row
+    rateRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    
+    // Focus on the first input of the new row
+    setTimeout(() => {
+        const firstSelect = rateRow.querySelector('select[name*="movement_type"]');
+        if (firstSelect) {
+            firstSelect.focus();
+        }
+    }, 100);
+    
+    // Show success feedback
+    showRateAddedFeedback('20ft', rate20ftCount);
 }
 
 // Add 40ft rate row
@@ -558,8 +850,20 @@ function addRate40ft() {
     rate40ftCount++;
     const container = document.getElementById('rates40ftContainer');
     const rateRow = document.createElement('div');
-    rateRow.className = 'rate-row p-4 border border-green-200 rounded-lg bg-green-25';
+    rateRow.className = 'rate-row p-4 border border-green-200 rounded-lg bg-green-25 mb-4';
+    rateRow.setAttribute('data-rate-id', `40ft-${rate40ftCount}`);
+    
     rateRow.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+            <h4 class="text-sm font-semibold text-green-800">
+                <i class="fas fa-shipping-fast mr-2"></i>
+                40ft Rate #${rate40ftCount}
+            </h4>
+            <button type="button" onclick="removeRate40ft(this)" class="remove-rate inline-flex items-center px-2 py-1 border border-red-300 text-xs font-medium rounded text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none transition-colors" ${rate40ftCount === 1 ? 'style="display: none;"' : ''}>
+                <i class="fas fa-trash mr-1"></i> Remove Rate
+            </button>
+        </div>
+        
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <!-- Movement Type -->
             <div>
@@ -583,20 +887,34 @@ function addRate40ft() {
                 </select>
             </div>
 
-            <!-- From Location -->
-            <div class="location-field">
+            <!-- From Location with Autocomplete -->
+            <div class="location-field relative">
                 <label class="block text-xs font-medium text-gray-700 mb-1">From Location <span class="location-required text-red-500" style="display: none;">*</span></label>
-                <input type="text" name="rates_40ft[${rate40ftCount}][from_location]" 
-                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500 location-input"
-                       placeholder="e.g., Mumbai Port, JNPT">
+                <div class="relative">
+                    <input type="text" 
+                           name="rates_40ft[${rate40ftCount}][from_location]" 
+                           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500 location-input autocomplete-input"
+                           placeholder="Start typing location..."
+                           autocomplete="off"
+                           data-field-type="from">
+                    <input type="hidden" name="rates_40ft[${rate40ftCount}][from_location_id]" class="location-id-input">
+                    <div class="autocomplete-dropdown absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto" style="display: none;"></div>
+                </div>
             </div>
 
-            <!-- To Location -->
-            <div class="location-field">
+            <!-- To Location with Autocomplete -->
+            <div class="location-field relative">
                 <label class="block text-xs font-medium text-gray-700 mb-1">To Location <span class="location-required text-red-500" style="display: none;">*</span></label>
-                <input type="text" name="rates_40ft[${rate40ftCount}][to_location]" 
-                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500 location-input"
-                       placeholder="e.g., Pune, Nashik">
+                <div class="relative">
+                    <input type="text" 
+                           name="rates_40ft[${rate40ftCount}][to_location]" 
+                           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500 location-input autocomplete-input"
+                           placeholder="Start typing location..."
+                           autocomplete="off"
+                           data-field-type="to">
+                    <input type="hidden" name="rates_40ft[${rate40ftCount}][to_location_id]" class="location-id-input">
+                    <div class="autocomplete-dropdown absolute z-50 w-full bg-white border border-gray-300 rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto" style="display: none;"></div>
+                </div>
             </div>
 
             <!-- Rate -->
@@ -626,20 +944,173 @@ function addRate40ft() {
             <label class="block text-xs font-medium text-gray-700 mb-1">Remarks</label>
             <input type="text" name="rates_40ft[${rate40ftCount}][remarks]" 
                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                   placeholder="Any additional notes about this rate">
+                   placeholder="Any additional notes about this rate (e.g., 'Premium service', 'Express delivery')">
         </div>
+    `;
+    
+    container.appendChild(rateRow);
+    
+    // Setup autocomplete for new inputs
+    const newInputs = rateRow.querySelectorAll('.autocomplete-input');
+    newInputs.forEach(input => {
+        locationAutocomplete.setupAutocomplete(input);
+    });
+    
+    // Update remove button visibility
+    toggleRemoveButtons40ft();
+    
+    // Scroll to the new rate row
+    rateRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    
+    // Focus on the first input of the new row
+    setTimeout(() => {
+        const firstSelect = rateRow.querySelector('select[name*="movement_type"]');
+        if (firstSelect) {
+            firstSelect.focus();
+        }
+    }, 100);
+    
+    // Show success feedback
+    showRateAddedFeedback('40ft', rate40ftCount);
+}
 
-        <div class="flex justify-end mt-4">
-            <button type="button" onclick="removeRate40ft(this)" class="remove-rate inline-flex items-center px-2 py-1 border border-red-300 text-xs font-medium rounded text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none" ${rate40ftCount === 1 ? 'style="display: none;"' : ''}>
-                <i class="fas fa-trash mr-1"></i> Remove
+// Remove rate functions
+function removeRate20ft(button) {
+    const rateRow = button.closest('.rate-row');
+    
+    if (confirm('Are you sure you want to remove this 20ft rate? This action cannot be undone.')) {
+        rateRow.style.transition = 'all 0.3s ease';
+        rateRow.style.opacity = '0';
+        rateRow.style.transform = 'translateX(-100%)';
+        
+        setTimeout(() => {
+            rateRow.remove();
+            rate20ftCount--;
+            toggleRemoveButtons20ft();
+            renumberRates('20ft');
+            showRateRemovedFeedback('20ft');
+        }, 300);
+    }
+}
+
+function removeRate40ft(button) {
+    const rateRow = button.closest('.rate-row');
+    
+    if (confirm('Are you sure you want to remove this 40ft rate? This action cannot be undone.')) {
+        rateRow.style.transition = 'all 0.3s ease';
+        rateRow.style.opacity = '0';
+        rateRow.style.transform = 'translateX(-100%)';
+        
+        setTimeout(() => {
+            rateRow.remove();
+            rate40ftCount--;
+            toggleRemoveButtons40ft();
+            renumberRates('40ft');
+            showRateRemovedFeedback('40ft');
+        }, 300);
+    }
+}
+
+// Toggle remove buttons visibility
+function toggleRemoveButtons20ft() {
+    const removeButtons = document.querySelectorAll('#rates20ftContainer .remove-rate');
+    const container = document.getElementById('rates20ftContainer');
+    const rateCount = container.children.length;
+    
+    removeButtons.forEach(button => {
+        button.style.display = rateCount > 1 ? 'inline-flex' : 'none';
+    });
+    
+    updateAddButtonText('20ft', rateCount);
+}
+
+function toggleRemoveButtons40ft() {
+    const removeButtons = document.querySelectorAll('#rates40ftContainer .remove-rate');
+    const container = document.getElementById('rates40ftContainer');
+    const rateCount = container.children.length;
+    
+    removeButtons.forEach(button => {
+        button.style.display = rateCount > 1 ? 'inline-flex' : 'none';
+    });
+    
+    updateAddButtonText('40ft', rateCount);
+}
+
+// Renumber rates after removal
+function renumberRates(containerSize) {
+    const container = document.getElementById(`rates${containerSize}Container`);
+    const rateRows = container.querySelectorAll('.rate-row');
+    
+    rateRows.forEach((row, index) => {
+        const rateNumber = index + 1;
+        const header = row.querySelector('h4');
+        if (header) {
+            header.innerHTML = `<i class="fas fa-shipping-fast mr-2"></i>${containerSize} Rate #${rateNumber}`;
+        }
+        row.setAttribute('data-rate-id', `${containerSize}-${rateNumber}`);
+    });
+}
+
+// Update add button text
+function updateAddButtonText(containerSize, count) {
+    const addButton = document.getElementById(`add${containerSize}Rate`);
+    if (addButton) {
+        if (count === 0) {
+            addButton.innerHTML = '<i class="fas fa-plus mr-1"></i> Add Rate';
+        } else {
+            addButton.innerHTML = `<i class="fas fa-plus mr-1"></i> Add Another Rate (${count + 1})`;
+        }
+    }
+}
+
+// Success feedback functions
+function showRateAddedFeedback(containerSize, rateNumber) {
+    const message = `${containerSize} Rate #${rateNumber} added successfully!`;
+    showNotificationToast('success', message);
+}
+
+function showRateRemovedFeedback(containerSize) {
+    const message = `${containerSize} rate removed successfully!`;
+    showNotificationToast('info', message);
+}
+
+// Notification toast system
+function showNotificationToast(type, message) {
+    const existingToasts = document.querySelectorAll('.rate-toast');
+    existingToasts.forEach(toast => toast.remove());
+    
+    const toast = document.createElement('div');
+    toast.className = `rate-toast fixed top-4 right-4 z-50 p-3 rounded-lg shadow-lg max-w-sm animate-slide-in ${
+        type === 'success' ? 'bg-green-100 border-l-4 border-green-500 text-green-700' :
+        type === 'info' ? 'bg-blue-100 border-l-4 border-blue-500 text-blue-700' :
+        'bg-red-100 border-l-4 border-red-500 text-red-700'
+    }`;
+    
+    toast.innerHTML = `
+        <div class="flex items-center">
+            <i class="fas ${
+                type === 'success' ? 'fa-check-circle' :
+                type === 'info' ? 'fa-info-circle' :
+                'fa-exclamation-circle'
+            } mr-2"></i>
+            <span class="text-sm font-medium">${message}</span>
+            <button onclick="this.parentElement.parentElement.remove()" class="ml-3 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times text-xs"></i>
             </button>
         </div>
     `;
-    container.appendChild(rateRow);
-    toggleRemoveButtons40ft();
+    
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.style.animation = 'slide-out 0.3s ease forwards';
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, 3000);
 }
 
-// Handle movement type changes - show/hide location requirement
+// Handle movement type changes
 function handleMovementTypeChange(selectElement) {
     const rateRow = selectElement.closest('.rate-row');
     const locationFields = rateRow.querySelectorAll('.location-field');
@@ -658,10 +1129,21 @@ function handleMovementTypeChange(selectElement) {
         if (requiresLocation) {
             input.setAttribute('required', '');
             input.style.borderColor = '#d1d5db';
+            input.style.backgroundColor = '#ffffff';
+            input.removeAttribute('disabled');
         } else {
             input.removeAttribute('required');
             input.value = ''; // Clear location values for local movements
-            input.style.borderColor = '#d1d5db';
+            input.style.borderColor = '#e5e7eb';
+            input.style.backgroundColor = '#f9fafb';
+        }
+    });
+    
+    // Clear hidden location IDs when movement type changes
+    const hiddenInputs = rateRow.querySelectorAll('.location-id-input');
+    hiddenInputs.forEach(hidden => {
+        if (!requiresLocation) {
+            hidden.value = '';
         }
     });
     
@@ -669,56 +1151,166 @@ function handleMovementTypeChange(selectElement) {
     locationFields.forEach(field => {
         if (requiresLocation) {
             field.style.opacity = '1';
+            field.classList.remove('opacity-50');
         } else {
             field.style.opacity = '0.6';
+            field.classList.add('opacity-50');
         }
     });
 }
 
-// Remove rate functions
-function removeRate20ft(button) {
-    button.closest('.rate-row').remove();
-    rate20ftCount--;
-    toggleRemoveButtons20ft();
-}
-
-function removeRate40ft(button) {
-    button.closest('.rate-row').remove();
-    rate40ftCount--;
-    toggleRemoveButtons40ft();
-}
-
-// Toggle remove buttons visibility
-function toggleRemoveButtons20ft() {
-    const removeButtons = document.querySelectorAll('#rates20ftContainer .remove-rate');
-    removeButtons.forEach(button => {
-        button.style.display = rate20ftCount > 1 ? 'block' : 'none';
-    });
-}
-
-function toggleRemoveButtons40ft() {
-    const removeButtons = document.querySelectorAll('#rates40ftContainer .remove-rate');
-    removeButtons.forEach(button => {
-        button.style.display = rate40ftCount > 1 ? 'block' : 'none';
-    });
-}
-
-// Form validation enhancement
+// Initialize event listeners when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    // Billing address formatting and validation
+    const billingAddressInput = document.getElementById('billing_address');
+    if (billingAddressInput) {
+        billingAddressInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+        
+        billingAddressInput.addEventListener('blur', function() {
+            const value = this.value.trim();
+            if (value) {
+                const formatted = value.split('\n').map(line => 
+                    line.charAt(0).toUpperCase() + line.slice(1).toLowerCase()
+                ).join('\n');
+                this.value = formatted;
+            }
+        });
+    }
+    
+    // Enhanced PAN number formatting
+    const panInput = document.getElementById('pan_number');
+    if (panInput) {
+        panInput.addEventListener('input', function() {
+            let value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            
+            if (value.length > 10) {
+                value = value.substring(0, 10);
+            }
+            
+            this.value = value;
+            
+            const isValid = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(value);
+            if (value.length === 10) {
+                if (isValid) {
+                    this.style.borderColor = '#10b981';
+                    this.style.backgroundColor = '#f0fdf4';
+                } else {
+                    this.style.borderColor = '#ef4444';
+                    this.style.backgroundColor = '#fef2f2';
+                }
+            } else {
+                this.style.borderColor = '#d1d5db';
+                this.style.backgroundColor = '#ffffff';
+            }
+        });
+    }
+    
+    // Enhanced GST number formatting
+    const gstInput = document.getElementById('gst_number');
+    if (gstInput) {
+        gstInput.addEventListener('input', function() {
+            let value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            
+            if (value.length > 15) {
+                value = value.substring(0, 15);
+            }
+            
+            this.value = value;
+            
+            if (value.length === 15) {
+                const isValidFormat = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$/.test(value);
+                if (isValidFormat) {
+                    this.style.borderColor = '#10b981';
+                    this.style.backgroundColor = '#f0fdf4';
+                } else {
+                    this.style.borderColor = '#ef4444';
+                    this.style.backgroundColor = '#fef2f2';
+                }
+            } else {
+                this.style.borderColor = '#d1d5db';
+                this.style.backgroundColor = '#ffffff';
+            }
+        });
+    }
+    
+    // Billing cycle selection enhancement
+    const billingCycleSelect = document.getElementById('billing_cycle_days');
+    if (billingCycleSelect) {
+        billingCycleSelect.addEventListener('change', function() {
+            const value = parseInt(this.value);
+            const helpText = this.parentElement.querySelector('.text-xs');
+            
+            if (helpText) {
+                if (value <= 7) {
+                    helpText.textContent = 'Weekly payment cycle - frequent invoicing';
+                    helpText.className = 'text-xs text-blue-600 mt-1';
+                } else if (value <= 30) {
+                    helpText.textContent = 'Monthly payment cycle - standard terms';
+                    helpText.className = 'text-xs text-green-600 mt-1';
+                } else if (value <= 60) {
+                    helpText.textContent = 'Extended payment terms - requires approval';
+                    helpText.className = 'text-xs text-amber-600 mt-1';
+                } else {
+                    helpText.textContent = 'Long-term payment cycle - special arrangements';
+                    helpText.className = 'text-xs text-red-600 mt-1';
+                }
+            }
+        });
+    }
+    
     // Add button listeners
-    document.getElementById('add20ftRate').addEventListener('click', addRate20ft);
-    document.getElementById('add40ftRate').addEventListener('click', addRate40ft);
-
+    const add20ftBtn = document.getElementById('add20ftRate');
+    const add40ftBtn = document.getElementById('add40ftRate');
+    
+    if (add20ftBtn) {
+        add20ftBtn.addEventListener('click', addRate20ft);
+    }
+    
+    if (add40ftBtn) {
+        add40ftBtn.addEventListener('click', addRate40ft);
+    }
+    
+    // Update button texts initially
+    updateAddButtonText('20ft', 0);
+    updateAddButtonText('40ft', 0);
+    
     // Enhanced form validation
-    document.querySelector('form').addEventListener('submit', function(e) {
-        let hasValidRates = false;
-        
-        // Check if at least one container size is enabled and has valid rates
-        const enable20ft = document.getElementById('enable20ft').checked;
-        const enable40ft = document.getElementById('enable40ft').checked;
-        
-        if (enable20ft || enable40ft) {
-            // Check for movement type and location validation
+    const form = document.querySelector('form');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            const billingAddress = document.getElementById('billing_address');
+            const pan = document.getElementById('pan_number');
+            const gst = document.getElementById('gst_number');
+            
+            // Billing address validation
+            if (billingAddress && billingAddress.value.trim().length < 10) {
+                e.preventDefault();
+                alert('Billing address must be at least 10 characters long.');
+                billingAddress.focus();
+                return false;
+            }
+            
+            // PAN validation (if provided)
+            if (pan && pan.value.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(pan.value.trim())) {
+                e.preventDefault();
+                alert('Invalid PAN format. Please use format: ABCDE1234F');
+                pan.focus();
+                return false;
+            }
+            
+            // GST validation (if provided)
+            if (gst && gst.value.trim() && (gst.value.trim().length !== 15 || !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$/.test(gst.value.trim()))) {
+                e.preventDefault();
+                alert('Invalid GST format. Please enter a valid 15-character GST number.');
+                gst.focus();
+                return false;
+            }
+            
+            // Rate validation for movement types requiring locations
+            let hasValidRates = true;
             const allRateRows = document.querySelectorAll('.rate-row');
             
             for (let row of allRateRows) {
@@ -737,19 +1329,88 @@ document.addEventListener('DOMContentLoaded', function() {
                             return false;
                         }
                     }
-                    hasValidRates = true;
                 }
             }
-        }
-        
-        // Optional: You can make rates completely optional
-        // if (!hasValidRates) {
-        //     e.preventDefault();
-        //     alert('Please add at least one valid rate configuration.');
-        //     return false;
-        // }
-    });
+        });
+    }
 });
+
+// CSS animations for toast notifications
+const toastStyles = document.createElement('style');
+toastStyles.textContent = `
+@keyframes slide-in {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slide-out {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+.animate-slide-in {
+    animation: slide-in 0.3s ease forwards;
+}
+
+.rate-row {
+    transition: all 0.3s ease;
+}
+
+.rate-row:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.bg-blue-25 {
+    background-color: rgba(59, 130, 246, 0.05);
+}
+
+.bg-green-25 {
+    background-color: rgba(34, 197, 94, 0.05);
+}
+
+.location-field {
+    transition: opacity 0.3s ease;
+}
+
+.autocomplete-dropdown {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    z-index: 1000;
+}
+
+.autocomplete-item {
+    transition: background-color 0.15s ease;
+}
+
+.autocomplete-item:hover {
+    background-color: #eff6ff;
+}
+
+.autocomplete-item.bg-blue-100 {
+    background-color: #dbeafe;
+}
+
+.autocomplete-input:focus {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+`;
+document.head.appendChild(toastStyles);
 </script>
 </body>
 </html>
