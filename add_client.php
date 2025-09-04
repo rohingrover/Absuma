@@ -111,7 +111,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
              ->execute([$client_code, $client_id]);
         
          
-        // Handle contractual rates for 20ft containers
 if (isset($_POST['rates_20ft']) && is_array($_POST['rates_20ft'])) {
     foreach ($_POST['rates_20ft'] as $index => $rate_data) {
         // Check if this rate entry has required data
@@ -161,15 +160,35 @@ if (isset($_POST['rates_40ft']) && is_array($_POST['rates_40ft'])) {
             $remarks = trim($rate_data['remarks'] ?? '');
             $from_location = trim($rate_data['from_location'] ?? '');
             $to_location = trim($rate_data['to_location'] ?? '');
+            
+            // Handle location IDs - get from hidden form fields or lookup from locations table
+            $from_location_id = !empty($rate_data['from_location_id']) ? (int)$rate_data['from_location_id'] : null;
+            $to_location_id = !empty($rate_data['to_location_id']) ? (int)$rate_data['to_location_id'] : null;
+            
+            // If location IDs are missing but location names exist, try to find them
+            if (!$from_location_id && !empty($from_location)) {
+                $locationStmt = $pdo->prepare("SELECT id FROM locations WHERE location = ? LIMIT 1");
+                $locationStmt->execute([$from_location]);
+                $locationResult = $locationStmt->fetch(PDO::FETCH_ASSOC);
+                $from_location_id = $locationResult ? (int)$locationResult['id'] : null;
+            }
+            
+            if (!$to_location_id && !empty($to_location)) {
+                $locationStmt = $pdo->prepare("SELECT id FROM locations WHERE location = ? LIMIT 1");
+                $locationStmt->execute([$to_location]);
+                $locationResult = $locationStmt->fetch(PDO::FETCH_ASSOC);
+                $to_location_id = $locationResult ? (int)$locationResult['id'] : null;
+            }
+            
             $effective_from = !empty($rate_data['effective_from']) ? $rate_data['effective_from'] : null;
             $effective_to = !empty($rate_data['effective_to']) ? $rate_data['effective_to'] : null;
             
             $rateStmt = $pdo->prepare("
                 INSERT INTO client_rates 
                 (client_id, container_size, movement_type, container_type, container_category, 
-                  rate, from_location, to_location, remarks, effective_from, 
-                 effective_to, is_active, created_at) 
-                VALUES (?, '40ft', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())
+                  rate, from_location, to_location, from_location_id, to_location_id, 
+                 remarks, effective_from, effective_to, is_active, created_at) 
+                VALUES (?, '40ft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())
             ");
             $rateStmt->execute([
                 $client_id, 
@@ -179,6 +198,8 @@ if (isset($_POST['rates_40ft']) && is_array($_POST['rates_40ft'])) {
                 $rate, 
                 $from_location, 
                 $to_location, 
+                $from_location_id,
+                $to_location_id,
                 $remarks,
                 $effective_from, 
                 $effective_to
