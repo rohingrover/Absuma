@@ -67,14 +67,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $columnsStmt = $pdo->query("SHOW COLUMNS FROM bookings");
             $existingColumns = $columnsStmt->fetchAll(PDO::FETCH_COLUMN, 0);
 
-            $insertColumns = ['booking_id','client_id','no_of_containers','from_location_id','to_location_id','created_by'];
-            $placeholders = ['?','?','?','?','?','?'];
+            $insertColumns = ['booking_id','client_id','no_of_containers','from_location_id','to_location_id','created_by','updated_by'];
+            $placeholders = ['?','?','?','?','?','?','?'];
             $params = [
             $booking_id,
             $client_id,
             $no_of_containers,
             $from_location_id,
             $to_location_id,
+            $_SESSION['user_id'],
             $_SESSION['user_id']
             ];
 
@@ -118,9 +119,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 } catch (Exception $e) { $containerTypeAllowsNull = false; }
 
                 if ($hasPerContainerLocations) {
-                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, to_location_id) \n                        VALUES (?, ?, ?, ?, ?, ?, ?)\n                    ");
+                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, to_location_id, created_by, updated_by) \n                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                    ");
                 } else {
-                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2) \n                        VALUES (?, ?, ?, ?, ?)\n                    ");
+                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, created_by, updated_by) \n                        VALUES (?, ?, ?, ?, ?, ?, ?)\n                    ");
                 }
 
                 $number_index = 0;
@@ -178,7 +179,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $number1,
                             $number2,
                             $container_from_id,
-                            $container_to_id
+                            $container_to_id,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_id']
                         ]);
                     } else {
                         $container_stmt_any->execute([
@@ -186,7 +189,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $sequence,
                             $container_type,
                             $number1,
-                            $number2
+                            $number2,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_id']
                         ]);
                     }
                 }

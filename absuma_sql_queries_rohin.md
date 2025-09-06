@@ -177,3 +177,23 @@ ALTER TABLE booking_containers
 **Notes**:
 - If your MySQL/MariaDB version does not support "IF NOT EXISTS" on ADD COLUMN/ADD CONSTRAINT, first check column/constraint existence and conditionally run the statements.
 - UI will offer a "Same locations for all containers" option that copies the global selection to each container row.
+
+---
+
+## Date: September 7, 2025 (Audit columns)
+
+### 7. Add created_by and updated_by
+
+```sql
+-- bookings: add updated_by (created_by already exists)
+ALTER TABLE bookings 
+  ADD COLUMN IF NOT EXISTS updated_by INT NULL AFTER created_by,
+  ADD CONSTRAINT IF NOT EXISTS fk_bookings_updated_by FOREIGN KEY (updated_by) REFERENCES users(id);
+
+-- booking_containers: add created_by and updated_by
+ALTER TABLE booking_containers 
+  ADD COLUMN IF NOT EXISTS created_by INT NULL AFTER updated_at,
+  ADD COLUMN IF NOT EXISTS updated_by INT NULL AFTER created_by,
+  ADD CONSTRAINT IF NOT EXISTS fk_bc_created_by FOREIGN KEY (created_by) REFERENCES users(id),
+  ADD CONSTRAINT IF NOT EXISTS fk_bc_updated_by FOREIGN KEY (updated_by) REFERENCES users(id);
+```

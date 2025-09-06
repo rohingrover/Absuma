@@ -59,7 +59,13 @@ try {
         $existing_containers = $c->fetchAll();
     }
 } catch (Exception $e) {}
-
+// Map existing created_by by sequence for preservation on edit
+$existingCreatedByBySeq = [];
+foreach ($existing_containers as $ec) {
+    if (isset($ec['container_sequence']) && isset($ec['created_by'])) {
+        $existingCreatedByBySeq[(int)$ec['container_sequence']] = $ec['created_by'];
+    }
+}
 
 // Get clients and locations for autocompletes
 $clients_stmt = $pdo->query("SELECT id, client_name, client_code FROM clients WHERE status = 'active' ORDER BY client_name");
@@ -118,10 +124,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             // Update main booking record
             $update_stmt = $pdo->prepare("
                 UPDATE bookings 
-                SET booking_id = ?, client_id = ?, no_of_containers = ?, from_location_id = ?, to_location_id = ?
+                SET booking_id = ?, client_id = ?, no_of_containers = ?, from_location_id = ?, to_location_id = ?, updated_by = ?
                 WHERE id = ?
             ");
-            $update_stmt->execute([$booking_id, $client_id, $no_of_containers, $from_location_id, $to_location_id, $existing_booking['id']]);
+            $update_stmt->execute([$booking_id, $client_id, $no_of_containers, $from_location_id, $to_location_id, $_SESSION['user_id'], $existing_booking['id']]);
             
             $booking_db_id = $existing_booking['id'];
             
@@ -153,9 +159,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 } catch (Exception $e) { $containerTypeAllowsNull = false; }
 
                 if ($hasPerContainerLocations) {
-                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, to_location_id) \n                        VALUES (?, ?, ?, ?, ?, ?, ?)\n                    ");
+                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, to_location_id, created_by, updated_by) \n                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                    ");
                 } else {
-                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2) \n                        VALUES (?, ?, ?, ?, ?)\n                    ");
+                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, created_by, updated_by) \n                        VALUES (?, ?, ?, ?, ?, ?, ?)\n                    ");
                 }
 
                 $number_index = 0;
@@ -203,23 +209,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $container_type = '20ft';
                     }
 
+                    // Preserve original created_by per sequence when available
+                    $preservedCreatedBy = $existingCreatedByBySeq[$sequence] ?? $_SESSION['user_id'];
+
                     if ($hasPerContainerLocations) {
-                        $container_stmt_any->execute([
-                            $booking_db_id,
-                            $sequence,
-                            $container_type,
-                            $number1,
-                            $number2,
-                            $container_from_id,
-                            $container_to_id
+                        $container_stmt_any->execute([ 
+                            $booking_db_id, $sequence, $container_type, $number1, $number2, $container_from_id, $container_to_id, $preservedCreatedBy, $_SESSION['user_id']
                         ]);
                     } else {
-                        $container_stmt_any->execute([
-                            $booking_db_id,
-                            $sequence,
-                            $container_type,
-                            $number1,
-                            $number2
+                        $container_stmt_any->execute([ 
+                            $booking_db_id, $sequence, $container_type, $number1, $number2, $preservedCreatedBy, $_SESSION['user_id']
                         ]);
                     }
                 }
