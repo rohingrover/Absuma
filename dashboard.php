@@ -281,6 +281,37 @@ $documentAlerts = getDocumentAlerts();
                                 </a>
                             </nav>
                         </div>
+                        
+                        <?php if ($_SESSION['role'] === 'manager1' || $_SESSION['role'] === 'admin' || $_SESSION['role'] === 'superadmin'): ?>
+                        <!-- Booking Section for Manager 1 -->
+                        <div class="mb-6">
+                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Booking Section</h3>
+                            <nav class="space-y-1.5">
+                                <a href="booking/create.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
+                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Create Booking
+                                </a>
+                                <a href="booking/manage.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
+                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Bookings
+                                </a>
+                            </nav>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if (in_array($_SESSION['role'], ['l2_supervisor', 'manager1', 'manager2', 'admin', 'superadmin'])): ?>
+                        <!-- Location Section -->
+                        <div class="mb-6">
+                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Location Section</h3>
+                            <nav class="space-y-1.5">
+                                <a href="location/create.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
+                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Add Location
+                                </a>
+                                <a href="location/manage.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
+                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Locations
+                                </a>
+                            </nav>
+                        </div>
+                        <?php endif; ?>
+                        
                         <div class="mb-6">
                             <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Vendors Section</h3>
                             <nav class="space-y-1">
