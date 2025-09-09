@@ -88,12 +88,48 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $same_locations_all = isset($_POST['same_locations_all']) ? 1 : 0;
         
         // Normalize optional FK fields to NULL when empty
-        $from_location_id = isset($_POST['from_location_id']) && $_POST['from_location_id'] !== ''
-            ? (int)$_POST['from_location_id']
-            : null;
-        $to_location_id = isset($_POST['to_location_id']) && $_POST['to_location_id'] !== ''
-            ? (int)$_POST['to_location_id']
-            : null;
+        // Handle both regular locations (loc_X) and yard locations (yard_X)
+        $from_location_id = null;
+        if (isset($_POST['from_location_id']) && $_POST['from_location_id'] !== '') {
+            $from_location_value = $_POST['from_location_id'];
+            if (strpos($from_location_value, 'loc_') === 0) {
+                // Regular location: extract the ID
+                $from_location_id = (int)substr($from_location_value, 4);
+            } elseif (strpos($from_location_value, 'yard_') === 0) {
+                // Yard location: get the associated location_id from yard_locations table
+                $yard_id = (int)substr($from_location_value, 5);
+                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
+                $yard_stmt->execute([$yard_id]);
+                $yard_result = $yard_stmt->fetch();
+                if ($yard_result) {
+                    $from_location_id = (int)$yard_result['location_id'];
+                }
+            } else {
+                // Fallback: try to cast as integer (legacy support)
+                $from_location_id = (int)$from_location_value;
+            }
+        }
+        
+        $to_location_id = null;
+        if (isset($_POST['to_location_id']) && $_POST['to_location_id'] !== '') {
+            $to_location_value = $_POST['to_location_id'];
+            if (strpos($to_location_value, 'loc_') === 0) {
+                // Regular location: extract the ID
+                $to_location_id = (int)substr($to_location_value, 4);
+            } elseif (strpos($to_location_value, 'yard_') === 0) {
+                // Yard location: get the associated location_id from yard_locations table
+                $yard_id = (int)substr($to_location_value, 5);
+                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
+                $yard_stmt->execute([$yard_id]);
+                $yard_result = $yard_stmt->fetch();
+                if ($yard_result) {
+                    $to_location_id = (int)$yard_result['location_id'];
+                }
+            } else {
+                // Fallback: try to cast as integer (legacy support)
+                $to_location_id = (int)$to_location_value;
+            }
+        }
             
         // Read booking id from visible or hidden field
         $booking_id = trim($_POST['booking_id'] ?? '');
@@ -235,8 +271,42 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $container_from_id = null;
                     $container_to_id = null;
                     if ($hasPerContainerLocations) {
-                        $container_from_id = isset($container_from_location_ids[$i]) && $container_from_location_ids[$i] !== '' ? (int)$container_from_location_ids[$i] : null;
-                        $container_to_id = isset($container_to_location_ids[$i]) && $container_to_location_ids[$i] !== '' ? (int)$container_to_location_ids[$i] : null;
+                        // Handle container from location
+                        if (isset($container_from_location_ids[$i]) && $container_from_location_ids[$i] !== '') {
+                            $container_from_value = $container_from_location_ids[$i];
+                            if (strpos($container_from_value, 'loc_') === 0) {
+                                $container_from_id = (int)substr($container_from_value, 4);
+                            } elseif (strpos($container_from_value, 'yard_') === 0) {
+                                $yard_id = (int)substr($container_from_value, 5);
+                                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
+                                $yard_stmt->execute([$yard_id]);
+                                $yard_result = $yard_stmt->fetch();
+                                if ($yard_result) {
+                                    $container_from_id = (int)$yard_result['location_id'];
+                                }
+                            } else {
+                                $container_from_id = (int)$container_from_value;
+                            }
+                        }
+                        
+                        // Handle container to location
+                        if (isset($container_to_location_ids[$i]) && $container_to_location_ids[$i] !== '') {
+                            $container_to_value = $container_to_location_ids[$i];
+                            if (strpos($container_to_value, 'loc_') === 0) {
+                                $container_to_id = (int)substr($container_to_value, 4);
+                            } elseif (strpos($container_to_value, 'yard_') === 0) {
+                                $yard_id = (int)substr($container_to_value, 5);
+                                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
+                                $yard_stmt->execute([$yard_id]);
+                                $yard_result = $yard_stmt->fetch();
+                                if ($yard_result) {
+                                    $container_to_id = (int)$yard_result['location_id'];
+                                }
+                            } else {
+                                $container_to_id = (int)$container_to_value;
+                            }
+                        }
+                        
                         if ($same_locations_all) {
                             if ($container_from_id === null) { $container_from_id = $from_location_id; }
                             if ($container_to_id === null) { $container_to_id = $to_location_id; }
@@ -265,9 +335,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $number1,
                             $number2,
                             $container_from_id,
-                            $container_to_id,
-                            $_SESSION['user_id'],
-                            $_SESSION['user_id']
+                            $container_to_id
                         ]);
                     } else {
                         $container_stmt_any->execute([
@@ -275,9 +343,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $sequence,
                             $container_type,
                             $number1,
-                            $number2,
-                            $_SESSION['user_id'],
-                            $_SESSION['user_id']
+                            $number2
                         ]);
                     }
                 }
