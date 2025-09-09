@@ -141,546 +141,574 @@ $financingSummary = getFinancingSummary();
 $topBanks = getTopBanks();
 $documentAlerts = getDocumentAlerts();
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Absuma Logistics Fleet Management</title>
+    <title>Dashboard - Fleet Management</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="notifications.js"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        'absuma-red': '#e53e3e',
-                        'absuma-red-dark': '#c53030',
-                        primary: {
-                            light: '#fed7d7',
-                            DEFAULT: '#e53e3e',
-                            dark: '#c53030',
-                        },
-                        secondary: {
-                            light: '#6ee7b7',
-                            DEFAULT: '#10b981',
-                            dark: '#059669',
-                        },
-                        accent: {
-                            light: '#fcd34d',
-                            DEFAULT: '#f59e0b',
-                            dark: '#d97706',
-                        },
-                        dark: '#1e293b',
-                        light: '#f8fafc',
-                    },
-                    animation: {
-                        'fade-in': 'fadeIn 0.4s ease-out forwards',
-                        'float': 'float 3s ease-in-out infinite',
-                        'pulse-slow': 'pulse 3s infinite',
-                    },
-                    keyframes: {
-                        fadeIn: {
-                            '0%': { opacity: '0', transform: 'translateY(10px)' },
-                            '100%': { opacity: '1', transform: 'translateY(0)' },
-                        },
-                        float: {
-                            '0%, 100%': { transform: 'translateY(0)' },
-                            '50%': { transform: 'translateY(-5px)' },
-                        }
-                    },
-                    boxShadow: {
-                        'soft': '0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025)',
-                        'glow': '0 0 15px -3px rgba(229, 62, 62, 0.3)',
-                        'glow-blue': '0 0 15px -3px rgba(99, 102, 241, 0.3)',
+                        'teal-600': '#0d9488',
+                        'teal-700': '#0f766e',
+                        'teal-500': '#14b8a6',
+                        'teal-50': '#f0fdfa',
+                        'teal-100': '#ccfbf1',
                     }
                 }
             }
         }
     </script>
     <style>
-        @layer utilities {
-            .animation-delay-100 { animation-delay: 0.1s; }
-            .animation-delay-200 { animation-delay: 0.2s; }
-            .animation-delay-300 { animation-delay: 0.3s; }
-            .animation-delay-400 { animation-delay: 0.4s; }
-            
-            .badge {
-                @apply inline-block px-2.5 py-1 rounded-full text-xs font-semibold;
+        .gradient-bg {
+            background: linear-gradient(135deg, #f0fdfa 0%, #e6fffa 100%);
+        }
+        
+        .shadow-soft {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        
+        .card-hover-effect {
+            transition: all 0.3s ease;
+        }
+        
+        .card-hover-effect:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.15);
+        }
+        
+        .animate-fade-in {
+            animation: fadeIn 0.6s ease-out forwards;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
             }
-            .badge-available {
-                @apply bg-green-100 text-green-800;
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
-            .badge-loaded {
-                @apply bg-blue-100 text-blue-800;
-            }
-            .badge-on_trip {
-                @apply bg-amber-100 text-amber-800;
-            }
-            .badge-maintenance {
-                @apply bg-red-100 text-red-800;
-            }
-            .badge-financed {
-                @apply bg-purple-100 text-purple-800;
-            }
-            .badge-own {
-                @apply bg-gray-100 text-gray-800;
-            }
-            .badge-expired {
-                @apply bg-red-100 text-red-800;
-            }
-            .badge-critical {
-                @apply bg-orange-100 text-orange-800;
-            }
-            .badge-warning {
-                @apply bg-amber-100 text-amber-800;
-            }
-            
-            .gradient-bg {
-                background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-            }
-            
-            .card-hover-effect {
-                @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-lg;
-            }
-
-            .absuma-gradient {
-                background: linear-gradient(135deg, #e53e3e 0%, #c53030 100%);
-            }
-
-            .stats-card {
-                @apply bg-white rounded-xl shadow-soft p-6 border-l-4 transition-all duration-300 hover:shadow-glow-blue hover:-translate-y-1;
-            }
+        }
+        
+        .progress-ring {
+            transition: stroke-dasharray 0.8s ease-in-out;
+        }
+        
+        .map-container {
+            background: linear-gradient(135deg, #ccfbf1 0%, #99f6e4 50%, #5eead4 100%);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .vehicle-marker {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: #f59e0b;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .revenue-bar {
+            transition: height 0.8s ease-out;
+        }
+        
+        .nav-active {
+            background: white;
+            color: #0d9488;
+        }
+        
+        .nav-item {
+            transition: all 0.2s ease;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
         }
     </style>
 </head>
 <body class="gradient-bg">
-    <div class="min-h-screen">
-        <!-- Header with Absuma Branding -->
-        <?php include 'header_component.php'; ?>
+    <div class="min-h-screen flex">
+        <!-- Sidebar Navigation -->
+      <?php include 'sidebar_navigation.php' ?>
 
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="flex flex-col lg:flex-row gap-6">
-                <!-- Sidebar with Absuma colors -->
-                <aside class="w-full lg:w-64 flex-shrink-0">
-                    <div class="bg-white rounded-xl shadow-soft p-4 sticky top-20 border border-white/20 backdrop-blur-sm bg-white/70">
-                        <!-- Vehicle Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Vehicle Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="add_vehicle.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Add Vehicle & Driver
-                                </a>
-                                <a href="manage_vehicles.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Vehicles
-                                </a>
-                                <a href="manage_drivers.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-users w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Manage Drivers
-                                </a>
-                            </nav>
-                        </div>
-                        
-                        <?php if ($_SESSION['role'] === 'manager1' || $_SESSION['role'] === 'admin' || $_SESSION['role'] === 'superadmin'): ?>
-                        <!-- Booking Section for Manager 1 -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Booking Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="booking/create.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Create Booking
-                                </a>
-                                <a href="booking/manage.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Bookings
-                                </a>
-                            </nav>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <?php if (in_array($_SESSION['role'], ['l2_supervisor', 'manager1', 'manager2', 'admin', 'superadmin'])): ?>
-                        <!-- Location Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Location Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="location/create.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Add Location
-                                </a>
-                                <a href="location/manage.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Locations
-                                </a>
-                            </nav>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Vendors Section</h3>
-                            <nav class="space-y-1">
-                                <a href="vendor_registration.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red"></i> Register Vendor
-                                </a>
-                                <a href="manage_vendors.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Manage Vendors
-                                </a>
-                               
-                            </nav>
-                        </div>
-						<div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Client Section</h3>
-                            <nav class="space-y-1">
-                                <a href="add_client.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red"></i> Register Client
-                                </a>
-                                <a href="manage_clients.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Manage Clients
-                                </a>
-                                <a href="client_reports.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Client Reports
-                                </a>
-                               
-                            </nav>
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col">
+            <!-- Header -->
+            <header class="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
+                    <div class="flex items-center space-x-4">
+                        <div class="relative">
+                            <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm"></i>
+                            <input
+                                type="text"
+                                placeholder="Search"
+                                class="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 text-sm"
+                            />
+                            <i class="fas fa-microphone absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-sm cursor-pointer hover:text-teal-600"></i>
                         </div>
                     </div>
-                </aside>
+                </div>
+            </header>
 
-                <!-- Main Content -->
-                <main class="flex-1">
-                    <div class="space-y-6">
-                        <!-- Welcome Section -->
-                        <div class="bg-white rounded-xl shadow-soft p-6 border-l-4 border-absuma-red">
+            <!-- Dashboard Content -->
+            <main class="flex-1 p-6 overflow-auto">
+                <!-- Top Cards Row -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                    
+                    <!-- Total Vehicles Card -->
+                    <div class="bg-white rounded-lg shadow-soft p-6 card-hover-effect animate-fade-in">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Total Vehicles</h3>
+                        <div class="flex items-center justify-center mb-4">
+                            <div class="relative w-32 h-32">
+                                <!-- Circular Progress -->
+                                <svg class="w-32 h-32 transform -rotate-90" viewBox="0 0 128 128">
+                                    <!-- Background circle -->
+                                    <circle
+                                        cx="64"
+                                        cy="64"
+                                        r="56"
+                                        stroke="#e5e7eb"
+                                        stroke-width="8"
+                                        fill="none"
+                                    />
+                                    <!-- Progress circle -->
+                                    <circle
+                                        cx="64"
+                                        cy="64"
+                                        r="56"
+                                        stroke="#14b8a6"
+                                        stroke-width="8"
+                                        fill="none"
+                                        stroke-dasharray="351.86"
+                                        stroke-dashoffset="35.19"
+                                        class="progress-ring"
+                                        stroke-linecap="round"
+                                    />
+                                </svg>
+                                <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                    <span class="text-2xl font-bold text-gray-900" id="total-vehicles">100</span>
+                                    <span class="text-sm text-gray-500">Vehicles</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="space-y-3">
                             <div class="flex items-center justify-between">
-                                <div>
-                                    <h2 class="text-2xl font-bold text-gray-800 mb-2">
-                                        Welcome back, <?= htmlspecialchars($_SESSION['full_name']) ?>!
-                                    </h2>
-                                    <p class="text-gray-600">Here's your fleet overview for today</p>
+                                <div class="flex items-center space-x-2">
+                                    <div class="w-3 h-3 bg-teal-500 rounded-full"></div>
+                                    <span class="text-sm text-gray-600">On Route</span>
                                 </div>
-                                <div class="hidden md:block">
-                                    <div class="bg-red-50 p-4 rounded-lg">
-                                        <i class="fas fa-chart-line text-3xl text-absuma-red"></i>
-                                    </div>
+                                <span class="font-medium" id="on-route">85</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <div class="w-3 h-3 bg-gray-300 rounded-full"></div>
+                                    <span class="text-sm text-gray-600">Available</span>
                                 </div>
+                                <span class="font-medium" id="available">10</span>
                             </div>
-                        </div>
-
-                        <!-- Stats Grid with Absuma colors -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            <!-- Available Vehicles Card -->
-                            <div class="stats-card border-green-300 animate-fade-in animation-delay-100">
-                                <div class="flex items-center gap-4">
-                                    <div class="w-12 h-12 rounded-full bg-green-200/70 flex items-center justify-center text-green-700 shadow-inner">
-                                        <i class="fas fa-truck text-lg"></i>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-medium text-green-800">Available Vehicles</p>
-                                        <div class="flex items-end gap-2">
-                                            <p class="text-2xl font-bold text-green-900" id="available-vehicles-count"><?= $availableVehicles ?></p>
-                                            <p class="text-xs text-green-600/80" id="last-updated">Updated: <?= date('H:i:s') ?></p>
-                                        </div>
-                                    </div>
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-2">
+                                    <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+                                    <span class="text-sm text-gray-600">Out of Service</span>
                                 </div>
-                            </div>
-
-                            <!-- On Trip Vehicles Card -->
-                            <div class="stats-card border-amber-300 animate-fade-in animation-delay-200">
-                                <div class="flex items-center gap-4">
-                                    <div class="w-12 h-12 rounded-full bg-amber-200/70 flex items-center justify-center text-amber-700 shadow-inner">
-                                        <i class="fas fa-truck-moving text-lg"></i>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-medium text-amber-800">On Trip/Loaded</p>
-                                        <p class="text-2xl font-bold text-amber-900"><?= $onTripVehicles ?></p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Maintenance Vehicles Card -->
-                            <div class="stats-card border-red-300 animate-fade-in animation-delay-300">
-                                <div class="flex items-center gap-4">
-                                    <div class="w-12 h-12 rounded-full bg-red-200/70 flex items-center justify-center text-red-700 shadow-inner">
-                                        <i class="fas fa-tools text-lg"></i>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-medium text-red-800">Under Maintenance</p>
-                                        <p class="text-2xl font-bold text-red-900"><?= $maintenanceVehicles ?></p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Fleet Utilization Card -->
-                            <div class="stats-card border-absuma-red animate-fade-in animation-delay-400">
-                                <div class="flex items-center gap-4">
-                                    <div class="w-12 h-12 rounded-full bg-red-200/70 flex items-center justify-center text-absuma-red shadow-inner">
-                                        <i class="fas fa-chart-line text-lg"></i>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-medium text-red-800">Fleet Utilization</p>
-                                        <p class="text-2xl font-bold text-red-900"><?= $fleetUtilization ?>%</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Vehicle Status Summary -->
-                        <div class="bg-white rounded-xl shadow-soft overflow-hidden animate-fade-in hover:shadow-glow transition-all duration-300 border border-white/20 backdrop-blur-sm bg-white/70">
-                            <div class="px-6 py-4 border-b border-gray-200/50 bg-gradient-to-r from-red-50 to-white">
-                                <h2 class="text-lg font-semibold text-dark flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-absuma-red">
-                                        <i class="fas fa-chart-pie"></i>
-                                    </div>
-                                    <span>Vehicle Status Overview</span>
-                                </h2>
-                            </div>
-                            <div class="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <?php foreach ($statusSummary as $status): ?>
-                                <div class="bg-white border border-gray-200/30 rounded-xl p-4 hover:shadow-md transition-all card-hover-effect">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <h3 class="text-sm font-medium text-gray-700"><?= ucfirst(str_replace('_', ' ', $status['current_status'])) ?></h3>
-                                        <span class="badge badge-<?= strtolower($status['current_status']) ?>"><?= $status['count'] ?></span>
-                                    </div>
-                                    <div class="mt-2">
-                                        <div class="flex justify-between text-xs font-medium text-gray-500 mb-1">
-                                            <span>Percentage</span>
-                                            <span><?= $status['percentage'] ?>%</span>
-                                        </div>
-                                        <div class="w-full bg-gray-200 rounded-full h-1.5">
-                                            <div class="bg-absuma-red h-1.5 rounded-full" style="width: <?= $status['percentage'] ?>%"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-
-                        <!-- Financing Summary -->
-                        <div class="bg-white rounded-xl shadow-soft overflow-hidden animate-fade-in hover:shadow-glow transition-all duration-300 border border-white/20 backdrop-blur-sm bg-white/70">
-                            <div class="px-6 py-4 border-b border-gray-200/50 bg-gradient-to-r from-green-50 to-white">
-                                <h2 class="text-lg font-semibold text-dark flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-700">
-                                        <i class="fas fa-money-bill-wave"></i>
-                                    </div>
-                                    <span>Financing Overview</span>
-                                </h2>
-                            </div>
-                            <div class="p-6">
-                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-purple-600"><?= $financingSummary['financed_count'] ?></div>
-                                        <div class="text-sm text-gray-600">Financed Vehicles</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-blue-600"><?= $financingSummary['own_count'] ?></div>
-                                        <div class="text-sm text-gray-600">Own Vehicles</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-green-600">₹<?= number_format($financingSummary['total_emi'], 0) ?></div>
-                                        <div class="text-sm text-gray-600">Total Monthly EMI</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-orange-600">₹<?= number_format($financingSummary['avg_emi'], 0) ?></div>
-                                        <div class="text-sm text-gray-600">Average EMI</div>
-                                    </div>
-                                </div>
-
-                                <?php if (!empty($topBanks)): ?>
-                                <div class="border-t border-gray-200 pt-4">
-                                    <h3 class="text-md font-medium text-gray-900 mb-4">Top Financing Banks</h3>
-                                    <div class="space-y-3">
-                                        <?php foreach ($topBanks as $bank): ?>
-                                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-red-50 transition-colors">
-                                            <div class="flex items-center gap-3">
-                                                <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-absuma-red">
-                                                    <i class="fas fa-university text-sm"></i>
-                                                </div>
-                                                <div>
-                                                    <div class="font-medium text-gray-900"><?= htmlspecialchars($bank['bank_name']) ?></div>
-                                                    <div class="text-sm text-gray-500"><?= $bank['vehicle_count'] ?> vehicles</div>
-                                                </div>
-                                            </div>
-                                            <div class="text-right">
-                                                <div class="font-medium text-gray-900">₹<?= number_format($bank['total_emi'], 0) ?></div>
-                                                <div class="text-sm text-gray-500">Total EMI</div>
-                                            </div>
-                                        </div>
-                                        <?php endforeach; ?>
-                                    </div>
-                                </div>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-
-                        <!-- Document Alerts -->
-                        <?php if (!empty($documentAlerts)): ?>
-                        <div class="bg-white rounded-xl shadow-soft overflow-hidden animate-fade-in hover:shadow-glow transition-all duration-300 border border-white/20 backdrop-blur-sm bg-white/70">
-                            <div class="px-6 py-4 border-b border-gray-200/50 bg-gradient-to-r from-red-50 to-white">
-                                <h2 class="text-lg font-semibold text-dark flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-700">
-                                        <i class="fas fa-exclamation-triangle"></i>
-                                    </div>
-                                    <span>Document Alerts</span>
-                                    <span class="badge badge-warning"><?= count($documentAlerts) ?></span>
-                                </h2>
-                            </div>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200/50">
-                                    <thead class="bg-gray-50/50">
-                                        <tr>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Vehicle</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Document</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Expiry Date</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200/30">
-                                        <?php foreach ($documentAlerts as $alert): ?>
-                                        <tr class="hover:bg-red-50/50 transition-colors">
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <div class="flex items-center gap-2">
-                                                    <i class="fas fa-truck text-absuma-red"></i>
-                                                    <span class="font-medium text-dark"><?= htmlspecialchars($alert['vehicle_number']) ?></span>
-                                                </div>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-dark">
-                                                <?= htmlspecialchars($alert['document_type']) ?>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-dark">
-                                                <?= date('M d, Y', strtotime($alert['expiry_date'])) ?>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <?php if ($alert['days_remaining'] < 0): ?>
-                                                    <span class="badge badge-expired">Expired (<?= abs($alert['days_remaining']) ?> days ago)</span>
-                                                <?php elseif ($alert['days_remaining'] <= 7): ?>
-                                                    <span class="badge badge-critical">Critical (<?= $alert['days_remaining'] ?> days)</span>
-                                                <?php else: ?>
-                                                    <span class="badge badge-warning">Expires in <?= $alert['days_remaining'] ?> days</span>
-                                                <?php endif; ?>
-                                            </td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <?php endif; ?>
-
-                        <!-- Recent Vehicles -->
-                        <div class="bg-white rounded-xl shadow-soft overflow-hidden animate-fade-in hover:shadow-glow transition-all duration-300 border border-white/20 backdrop-blur-sm bg-white/70">
-                            <div class="px-6 py-4 border-b border-gray-200/50 flex justify-between items-center bg-gradient-to-r from-blue-50 to-white">
-                                <h2 class="text-lg font-semibold text-dark flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                                        <i class="fas fa-clock"></i>
-                                    </div>
-                                    <span>Recently Added Vehicles</span>
-                                </h2>
-                                <a href="manage_vehicles.php" class="text-sm font-medium text-absuma-red hover:text-absuma-red-dark flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 transition-all">
-                                    View All <i class="fas fa-arrow-right text-xs mt-0.5"></i>
-                                </a>
-                            </div>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200/50">
-                                    <thead class="bg-gray-50/50">
-                                        <tr>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Vehicle</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Driver/Owner</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Vehicle Info</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Status</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Financing</th>
-                                            <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-absuma-red uppercase tracking-wider">Added</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200/30">
-                                        <?php 
-                                        $recentVehicles = getRecentVehicles(8); 
-                                        foreach ($recentVehicles as $vehicle): ?>
-                                        <tr class="hover:bg-red-50/50 transition-colors">
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <div class="flex items-center">
-                                                    <div class="flex-shrink-0 h-8 w-8 rounded-full bg-red-100 flex items-center justify-center text-absuma-red">
-                                                        <i class="fas fa-truck text-sm"></i>
-                                                    </div>
-                                                    <div class="ml-3">
-                                                        <div class="font-medium text-dark"><?= htmlspecialchars($vehicle['vehicle_number']) ?></div>
-                                                        <?php if ($vehicle['make_model']): ?>
-                                                            <div class="text-xs text-gray-500"><?= htmlspecialchars($vehicle['make_model']) ?></div>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <div class="text-sm text-dark font-medium">
-                                                    <i class="fas fa-user text-gray-400 mr-1"></i>
-                                                    <?= htmlspecialchars($vehicle['driver_name']) ?>
-                                                </div>
-                                                <?php if ($vehicle['owner_name'] && $vehicle['owner_name'] !== $vehicle['driver_name']): ?>
-                                                    <div class="text-xs text-gray-500">
-                                                        <i class="fas fa-crown text-yellow-500 mr-1"></i>
-                                                        <?= htmlspecialchars($vehicle['owner_name']) ?>
-                                                    </div>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <?php if ($vehicle['manufacturing_year']): ?>
-                                                    <div class="text-sm text-dark">Year: <?= $vehicle['manufacturing_year'] ?></div>
-                                                <?php endif; ?>
-                                                <?php if ($vehicle['gvw']): ?>
-                                                    <div class="text-xs text-gray-500">GVW: <?= number_format($vehicle['gvw'], 0) ?> kg</div>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <span class="badge badge-<?= strtolower($vehicle['current_status']) ?>">
-                                                    <?= ucfirst(str_replace('_', ' ', $vehicle['current_status'])) ?>
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap">
-                                                <span class="badge badge-<?= strtolower(str_replace(' ', '-', $vehicle['financing_status'])) ?>">
-                                                    <?= $vehicle['financing_status'] ?>
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-dark">
-                                                <?= date('M d, Y', strtotime($vehicle['created_at'])) ?>
-                                            </td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
+                                <span class="font-medium" id="out-of-service">5</span>
                             </div>
                         </div>
                     </div>
-                </main>
-            </div>
+
+                    <!-- Trips Card -->
+                    <div class="bg-white rounded-lg shadow-soft p-6 card-hover-effect animate-fade-in" style="animation-delay: 0.1s">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Trips</h3>
+                        <div class="space-y-4">
+                            <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                                    <span class="text-sm text-gray-600">Live Trips</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <span class="font-medium text-lg" id="live-trips">68</span>
+                                    <i class="fas fa-chevron-right text-gray-400 text-xs"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                                    <span class="text-sm text-gray-600">Scheduled Trips</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <span class="font-medium text-lg" id="scheduled-trips">12</span>
+                                    <i class="fas fa-chevron-right text-gray-400 text-xs"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-3 h-3 bg-green-500 rounded-full"></div>
+                                    <span class="text-sm text-gray-600">Completed Trips</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <span class="font-medium text-lg" id="completed-trips">13</span>
+                                    <i class="fas fa-chevron-right text-gray-400 text-xs"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between py-2">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-3 h-3 bg-red-500 rounded-full"></div>
+                                    <span class="text-sm text-gray-600">Late Trips</span>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <span class="font-medium text-lg" id="late-trips">7</span>
+                                    <i class="fas fa-chevron-right text-gray-400 text-xs"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Vehicle Condition Card -->
+                    <div class="bg-white rounded-lg shadow-soft p-6 card-hover-effect animate-fade-in" style="animation-delay: 0.2s">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Vehicles Condition</h3>
+                        <div class="grid grid-cols-3 gap-4">
+                            <!-- Good Condition -->
+                            <div class="text-center">
+                                <div class="relative w-16 h-16 mx-auto mb-2">
+                                    <svg class="w-16 h-16 transform -rotate-90" viewBox="0 0 64 64">
+                                        <circle cx="32" cy="32" r="28" stroke="#e5e7eb" stroke-width="4" fill="none"/>
+                                        <circle cx="32" cy="32" r="28" stroke="#10b981" stroke-width="4" fill="none"
+                                                stroke-dasharray="175.93" stroke-dashoffset="26.39" class="progress-ring"/>
+                                    </svg>
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <span class="text-xs font-bold" id="good-vehicles">85</span>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-gray-600 font-medium">Good</div>
+                                <div class="text-xs text-gray-500">Vehicles</div>
+                            </div>
+                            
+                            <!-- Satisfactory Condition -->
+                            <div class="text-center">
+                                <div class="relative w-16 h-16 mx-auto mb-2">
+                                    <svg class="w-16 h-16 transform -rotate-90" viewBox="0 0 64 64">
+                                        <circle cx="32" cy="32" r="28" stroke="#e5e7eb" stroke-width="4" fill="none"/>
+                                        <circle cx="32" cy="32" r="28" stroke="#f59e0b" stroke-width="4" fill="none"
+                                                stroke-dasharray="175.93" stroke-dashoffset="158.34" class="progress-ring"/>
+                                    </svg>
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <span class="text-xs font-bold" id="satisfactory-vehicles">10</span>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-gray-600 font-medium">Satisfactory</div>
+                                <div class="text-xs text-gray-500">Vehicles</div>
+                            </div>
+
+                            <!-- Critical Condition -->
+                            <div class="text-center">
+                                <div class="relative w-16 h-16 mx-auto mb-2">
+                                    <svg class="w-16 h-16 transform -rotate-90" viewBox="0 0 64 64">
+                                        <circle cx="32" cy="32" r="28" stroke="#e5e7eb" stroke-width="4" fill="none"/>
+                                        <circle cx="32" cy="32" r="28" stroke="#ef4444" stroke-width="4" fill="none"
+                                                stroke-dasharray="175.93" stroke-dashoffset="167.13" class="progress-ring"/>
+                                    </svg>
+                                    <div class="absolute inset-0 flex items-center justify-center">
+                                        <span class="text-xs font-bold" id="critical-vehicles">5</span>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-gray-600 font-medium">Critical</div>
+                                <div class="text-xs text-gray-500">Vehicles</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bottom Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Live Tracking Map -->
+                    <div class="lg:col-span-2 bg-white rounded-lg shadow-soft p-6 card-hover-effect animate-fade-in" style="animation-delay: 0.3s">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Live Tracking</h3>
+                        <div class="relative h-64 map-container rounded-lg overflow-hidden">
+                            <!-- City Label -->
+                            <div class="absolute top-4 left-4 bg-white px-3 py-1 rounded shadow text-sm font-medium z-10">
+                                Chennai
+                            </div>
+                            
+                            <!-- Road Lines -->
+                            <div class="absolute top-8 left-0 w-full h-0.5 bg-gray-400 opacity-30"></div>
+                            <div class="absolute top-16 left-0 w-full h-0.5 bg-gray-400 opacity-30"></div>
+                            <div class="absolute bottom-16 left-0 w-full h-0.5 bg-gray-400 opacity-30"></div>
+                            <div class="absolute top-0 left-1/4 w-0.5 h-full bg-gray-400 opacity-30"></div>
+                            <div class="absolute top-0 right-1/4 w-0.5 h-full bg-gray-400 opacity-30"></div>
+                            
+                            <!-- Vehicle Markers -->
+                            <div class="vehicle-marker" style="top: 12%; left: 20%;"></div>
+                            <div class="vehicle-marker" style="top: 25%; right: 32%;"></div>
+                            <div class="vehicle-marker" style="bottom: 30%; left: 32%;"></div>
+                            <div class="vehicle-marker" style="bottom: 20%; right: 20%;"></div>
+                            <div class="vehicle-marker" style="top: 45%; left: 45%;"></div>
+                            <div class="vehicle-marker" style="top: 60%; right: 40%;"></div>
+                            <div class="vehicle-marker" style="bottom: 35%; left: 60%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Revenue Chart -->
+                    <div class="bg-white rounded-lg shadow-soft p-6 card-hover-effect animate-fade-in" style="animation-delay: 0.4s">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Revenue</h3>
+                        <div class="h-48 flex items-end justify-between space-x-2 mb-4" id="revenue-chart">
+                            <!-- Revenue bars will be inserted here by JavaScript -->
+                        </div>
+                        <div class="text-center pt-4 border-t border-gray-100">
+                            <div class="text-2xl font-bold text-gray-900">₹2,450K</div>
+                            <div class="text-sm text-gray-600">Total Revenue</div>
+                        </div>
+                    </div>
+                </div>
+            </main>
         </div>
     </div>
 
     <script>
-        // Auto-refresh every 30 seconds
-        setInterval(function() {
-            fetch('get_dashboard_stats.php')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.available !== undefined) {
-                        document.getElementById('available-vehicles-count').textContent = data.available;
-                        document.getElementById('last-updated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
-                        
-                        // Add pulse animation to show update
-                        const countElement = document.getElementById('available-vehicles-count');
-                        countElement.classList.add('animate-pulse');
-                        setTimeout(() => {
-                            countElement.classList.remove('animate-pulse');
-                        }, 1000);
-                    }
-                })
-                .catch(error => {
-                    console.log('Auto-refresh failed:', error);
+        // Dashboard Data Management
+        class DashboardManager {
+            constructor() {
+                this.data = {
+                    vehicles: {
+                        total: 100,
+                        onRoute: 85,
+                        available: 10,
+                        outOfService: 5
+                    },
+                    trips: {
+                        live: 68,
+                        scheduled: 12,
+                        completed: 13,
+                        late: 7
+                    },
+                    condition: {
+                        good: 85,
+                        satisfactory: 10,
+                        critical: 5
+                    },
+                    revenue: [
+                        { month: 'Jan', value: 500 },
+                        { month: 'Feb', value: 400 },
+                        { month: 'Mar', value: 250 },
+                        { month: 'Apr', value: 450 },
+                        { month: 'May', value: 500 },
+                        { month: 'Jun', value: 350 }
+                    ]
+                };
+                this.init();
+            }
+
+            init() {
+                this.renderRevenueChart();
+                this.updateCircularProgress();
+                this.setupRealTimeUpdates();
+            }
+
+            renderRevenueChart() {
+                const chartContainer = document.getElementById('revenue-chart');
+                const maxValue = Math.max(...this.data.revenue.map(item => item.value));
+                
+                chartContainer.innerHTML = '';
+                
+                this.data.revenue.forEach((item, index) => {
+                    const percentage = (item.value / maxValue) * 100;
+                    const bar = document.createElement('div');
+                    bar.className = 'flex flex-col items-center flex-1';
+                    bar.innerHTML = `
+                        <div class="w-full bg-teal-500 rounded-t revenue-bar hover:bg-teal-600 transition-colors cursor-pointer" 
+                             style="height: ${percentage * 1.6}px; min-height: 4px;"
+                             title="${item.month}: ₹${item.value}K">
+                        </div>
+                        <span class="text-xs text-gray-600 mt-2">${item.month}</span>
+                    `;
+                    chartContainer.appendChild(bar);
                 });
-        }, 30000);
-        
-        function updateCurrentTime() {
-            const now = new Date();
-            const timeElement = document.getElementById('current-time');
-            if (timeElement) {
-                timeElement.textContent = now.toLocaleTimeString();
+            }
+
+            updateCircularProgress() {
+                const totalVehicles = this.data.vehicles.total;
+                const onRoute = this.data.vehicles.onRoute;
+                const circumference = 2 * Math.PI * 56; // radius = 56
+                const progress = (onRoute / totalVehicles) * circumference;
+                const offset = circumference - progress;
+                
+                const progressCircle = document.querySelector('.progress-ring');
+                if (progressCircle) {
+                    progressCircle.style.strokeDashoffset = offset;
+                }
+            }
+
+            setupRealTimeUpdates() {
+                // Simulate real-time data updates
+                setInterval(() => {
+                    this.simulateDataUpdate();
+                }, 30000); // Update every 30 seconds
+            }
+
+            simulateDataUpdate() {
+                // Add small random variations to simulate real-time data
+                const variation = () => Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
+                
+                this.data.trips.live = Math.max(60, Math.min(75, this.data.trips.live + variation()));
+                this.data.trips.late = Math.max(5, Math.min(10, this.data.trips.late + variation()));
+                
+                // Update display
+                document.getElementById('live-trips').textContent = this.data.trips.live;
+                document.getElementById('late-trips').textContent = this.data.trips.late;
+            }
+
+            // Method to integrate with PHP data
+            updateFromServer(serverData) {
+                if (serverData.vehicles) {
+                    this.data.vehicles = { ...this.data.vehicles, ...serverData.vehicles };
+                    this.updateVehicleDisplay();
+                }
+                if (serverData.trips) {
+                    this.data.trips = { ...this.data.trips, ...serverData.trips };
+                    this.updateTripsDisplay();
+                }
+                if (serverData.revenue) {
+                    this.data.revenue = serverData.revenue;
+                    this.renderRevenueChart();
+                }
+            }
+
+            updateVehicleDisplay() {
+                document.getElementById('total-vehicles').textContent = this.data.vehicles.total;
+                document.getElementById('on-route').textContent = this.data.vehicles.onRoute;
+                document.getElementById('available').textContent = this.data.vehicles.available;
+                document.getElementById('out-of-service').textContent = this.data.vehicles.outOfService;
+                this.updateCircularProgress();
+            }
+
+            updateTripsDisplay() {
+                document.getElementById('live-trips').textContent = this.data.trips.live;
+                document.getElementById('scheduled-trips').textContent = this.data.trips.scheduled;
+                document.getElementById('completed-trips').textContent = this.data.trips.completed;
+                document.getElementById('late-trips').textContent = this.data.trips.late;
             }
         }
-        setInterval(updateCurrentTime, 1000);
+
+        // Navigation Management
+        class NavigationManager {
+            constructor() {
+                this.setupNavigation();
+            }
+
+            setupNavigation() {
+                const navItems = document.querySelectorAll('.nav-item');
+                navItems.forEach(item => {
+                    item.addEventListener('click', (e) => {
+                        if (!item.classList.contains('nav-active')) {
+                            this.setActiveNav(item);
+                        }
+                    });
+                });
+            }
+
+            setActiveNav(activeItem) {
+                const navItems = document.querySelectorAll('.nav-item');
+                navItems.forEach(item => {
+                    item.classList.remove('nav-active');
+                    item.classList.add('text-teal-100');
+                });
+                
+                activeItem.classList.add('nav-active');
+                activeItem.classList.remove('text-teal-100');
+            }
+        }
+
+        // Search Functionality
+        class SearchManager {
+            constructor() {
+                this.setupSearch();
+            }
+
+            setupSearch() {
+                const searchInput = document.querySelector('input[placeholder="Search"]');
+                const micIcon = document.querySelector('.fa-microphone');
+                
+                searchInput.addEventListener('input', (e) => {
+                    this.handleSearch(e.target.value);
+                });
+
+                micIcon.addEventListener('click', () => {
+                    this.handleVoiceSearch();
+                });
+            }
+
+            handleSearch(query) {
+                if (query.length > 2) {
+                    console.log('Searching for:', query);
+                    // Implement search functionality here
+                    // You can integrate this with your PHP backend
+                }
+            }
+
+            handleVoiceSearch() {
+                if ('webkitSpeechRecognition' in window) {
+                    const recognition = new webkitSpeechRecognition();
+                    recognition.lang = 'en-US';
+                    recognition.onresult = (event) => {
+                        const result = event.results[0][0].transcript;
+                        document.querySelector('input[placeholder="Search"]').value = result;
+                        this.handleSearch(result);
+                    };
+                    recognition.start();
+                } else {
+                    alert('Voice search not supported in this browser');
+                }
+            }
+        }
+
+        // Initialize Dashboard
+        document.addEventListener('DOMContentLoaded', () => {
+            const dashboard = new DashboardManager();
+            const navigation = new NavigationManager();
+            const search = new SearchManager();
+
+            // Example of how to integrate with PHP data
+            // You can call this function with data from your PHP backend
+            window.updateDashboard = function(phpData) {
+                dashboard.updateFromServer(phpData);
+            };
+
+            console.log('Dashboard initialized successfully');
+        });
+
+        // PHP Integration Helper Functions
+        function fetchDashboardData() {
+            // Example AJAX call to get updated data from your PHP backend
+            fetch('dashboard_api.php')
+                .then(response => response.json())
+                .then(data => {
+                    window.updateDashboard(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching dashboard data:', error);
+                });
+        }
+
+        // Auto-refresh data every 5 minutes
+        setInterval(fetchDashboardData, 300000);
     </script>
 </body>
 </html>

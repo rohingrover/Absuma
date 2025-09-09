@@ -14,9 +14,6 @@ if ($_SESSION['role'] !== 'manager1' && $_SESSION['role'] !== 'admin' && $_SESSI
 	exit();
 }
 
-// Set page title and subtitle for header component
-$page_title = 'Manage Bookings';
-$page_subtitle = 'View and manage all container bookings';
 
 // Filters
 $client_id_f = isset($_GET['client_id']) && $_GET['client_id'] !== '' ? (int)$_GET['client_id'] : null;

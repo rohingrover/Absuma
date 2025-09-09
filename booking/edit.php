@@ -9,10 +9,6 @@ if ($_SESSION['role'] !== 'manager1' && $_SESSION['role'] !== 'admin' && $_SESSI
     exit();
 }
 
-// Set page title and subtitle for header component
-$page_title = 'Edit Booking';
-$page_subtitle = 'Container Booking Management';
-
 $success_message = '';
 $error_message = '';
 

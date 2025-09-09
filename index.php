@@ -2,35 +2,83 @@
 session_start();
 require 'db_connection.php';
 
-// Redirect to dashboard if already logged in
-if (isset($_SESSION['user_id'])) {
-    header("Location: dashboard.php");
-    exit();
-}
-
-$error = '';
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+// Handle login
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
     $username = trim($_POST['username']);
     $password = trim($_POST['password']);
-    
-    if (!empty($username) && !empty($password)) {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
-        $stmt->execute([$username]);
-        $user = $stmt->fetch();
-        
-        if ($user && password_verify($password, $user['password'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['username'] = $user['username'];
-            $_SESSION['role'] = $user['role'];
-            $_SESSION['full_name'] = $user['full_name'];
-            
-            header("Location: dashboard.php");
-            exit();
-        } else {
-            $error = "Invalid username or password";
-        }
+
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? AND status = 'active'");
+    $stmt->execute([$username]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['full_name'] = $user['full_name'];
+        $_SESSION['role'] = $user['role'];
+        header("Location: dashboard.php");
+        exit();
     } else {
-        $error = "Please enter both username and password";
+        $error = "Invalid username or password.";
+    }
+}
+
+// Handle signup request
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['signup'])) {
+    try {
+        $pdo->beginTransaction();
+
+        $signup_data = [
+            'username' => trim($_POST['username']),
+            'password' => password_hash(trim($_POST['password']), PASSWORD_DEFAULT),
+            'full_name' => trim($_POST['full_name']),
+            'email' => trim($_POST['email']),
+            'created_at' => date('Y-m-d H:i:s'),
+            'status' => 'pending'
+        ];
+
+        // Validation
+        $errors = [];
+        if (empty($signup_data['username'])) {
+            $errors[] = "Username is required";
+        }
+        if (empty($signup_data['password'])) {
+            $errors[] = "Password is required";
+        }
+        if (empty($signup_data['full_name'])) {
+            $errors[] = "Full name is required";
+        }
+        if (empty($signup_data['email']) || !filter_var($signup_data['email'], FILTER_VALIDATE_EMAIL)) {
+            $errors[] = "Valid email address is required";
+        }
+
+        // Check for duplicate username
+        $usernameCheck = $pdo->prepare("SELECT id FROM signup_requests WHERE username = ?");
+        $usernameCheck->execute([$signup_data['username']]);
+        if ($usernameCheck->rowCount() > 0) {
+            $errors[] = "Username already requested";
+        }
+
+        // Check for duplicate email
+        $emailCheck = $pdo->prepare("SELECT id FROM signup_requests WHERE email = ?");
+        $emailCheck->execute([$signup_data['email']]);
+        if ($emailCheck->rowCount() > 0) {
+            $errors[] = "Email already requested";
+        }
+
+        if (!empty($errors)) {
+            throw new Exception(implode("<br>", $errors));
+        }
+
+        // Insert into signup_requests table
+        $sql = "INSERT INTO signup_requests (username, password, full_name, email, created_at, status) VALUES (:username, :password, :full_name, :email, :created_at, :status)";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($signup_data);
+
+        $pdo->commit();
+        $success = "Signup request submitted successfully. Please wait for admin approval.";
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        $error = $e->getMessage();
     }
 }
 ?>
@@ -39,369 +87,142 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Absuma Logistics - Fleet Management Login</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <title>Login - Absuma Logistics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root {
-            --primary: #e53e3e;
-            --primary-light: #fed7d7;
-            --secondary: #2d3748;
-            --text: #2b2d42;
-            --text-light: #8d99ae;
-            --background: #f7fafc;
-            --white: #ffffff;
-            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            --radius: 0.75rem;
-            --transition: all 0.3s ease;
+        .gradient-bg {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
         }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        .card-hover-effect {
+            transition: all 0.3s ease;
         }
-
-        body {
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 1rem;
-        }
-
-        .login-container {
-            width: 100%;
-            max-width: 440px;
-            background: var(--white);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-lg);
-            overflow: hidden;
-            transition: var(--transition);
-            backdrop-filter: blur(10px);
-        }
-
-        .login-container:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-        }
-
-        .login-header {
-            background: linear-gradient(135deg, var(--primary) 0%, #c53030 100%);
-            color: var(--white);
-            padding: 2rem 1.5rem;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .login-header::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.1), transparent);
-            transform: rotate(45deg);
-            animation: shimmer 3s infinite;
-        }
-
-        @keyframes shimmer {
-            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
-            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
-        }
-
-        .logo-container {
-            margin-bottom: 1rem;
-            position: relative;
-            z-index: 1;
-        }
-
-        .logo-text {
-            font-size: 1.75rem;
-            font-weight: 800;
-            letter-spacing: -0.025em;
-            margin-bottom: 0.5rem;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .logo-tagline {
-            font-size: 0.875rem;
-            opacity: 0.95;
-            font-weight: 500;
-            letter-spacing: 0.05em;
-            margin-bottom: 0.75rem;
-        }
-
-        .services-list {
-            display: flex;
-            justify-content: center;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .service-item {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 0.25rem 0.75rem;
-            border-radius: 1rem;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            backdrop-filter: blur(10px);
-        }
-
-        .system-title {
-            font-size: 1rem;
-            margin-top: 1rem;
-            opacity: 0.9;
-            font-weight: 600;
-        }
-
-        .login-content {
-            padding: 2rem 1.5rem;
-        }
-
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
-            color: var(--text);
-            font-size: 0.875rem;
-        }
-
-        .input-group {
-            position: relative;
-        }
-
-        .input-icon {
-            position: absolute;
-            left: 1rem;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-light);
-            z-index: 1;
-        }
-
-        input[type="text"],
-        input[type="password"] {
-            width: 100%;
-            padding: 0.875rem 1rem 0.875rem 2.75rem;
-            border: 2px solid #e2e8f0;
-            border-radius: var(--radius);
-            font-family: inherit;
-            font-size: 1rem;
-            transition: var(--transition);
-            background: #f8fafc;
-        }
-
-        input[type="text"]:focus,
-        input[type="password"]:focus {
-            outline: none;
-            border-color: var(--primary);
-            background: var(--white);
-            box-shadow: 0 0 0 3px var(--primary-light);
-        }
-
-        .btn {
-            width: 100%;
-            padding: 0.875rem;
-            background: linear-gradient(135deg, var(--primary) 0%, #c53030 100%);
-            color: var(--white);
-            border: none;
-            border-radius: var(--radius);
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: var(--transition);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 0.5rem;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            transition: var(--transition);
-        }
-
-        .btn:hover {
+        .card-hover-effect:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px -5px rgba(229, 62, 62, 0.4);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         }
-
-        .btn:hover::before {
-            left: 100%;
+        .animate-fade-in {
+            animation: fadeIn 0.6s ease-out forwards;
+            opacity: 0;
         }
-
-        .btn:active {
-            transform: translateY(0);
-        }
-
-        .alert {
-            padding: 1rem;
-            border-radius: var(--radius);
-            margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            animation: slideIn 0.3s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .alert-error {
-            background: #fed7d7;
-            color: #c53030;
-            border: 1px solid #feb2b2;
-        }
-
-        .footer-text {
-            text-align: center;
-            margin-top: 1.5rem;
-            color: var(--text-light);
-            font-size: 0.875rem;
-        }
-
-        @media (max-width: 480px) {
-            .login-container {
-                max-width: 100%;
-                margin: 1rem;
-            }
-            
-            .login-header {
-                padding: 1.5rem 1rem;
-            }
-            
-            .logo-text {
-                font-size: 1.5rem;
-            }
-            
-            .services-list {
-                gap: 0.5rem;
-            }
-            
-            .service-item {
-                font-size: 0.6875rem;
-                padding: 0.2rem 0.5rem;
-            }
-        }
-
-        /* Loading animation for button */
-        .btn.loading {
-            pointer-events: none;
-        }
-
-        .btn.loading::after {
-            content: '';
-            width: 1rem;
-            height: 1rem;
-            border: 2px solid transparent;
-            border-top: 2px solid white;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-left: 0.5rem;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
-<body>
-    <div class="login-container">
-        <div class="login-header">
-            <div class="logo-container">
-                <div class="logo-text">ABSUMA Logistics India Pvt. Ltd.</div>
-                <div class="logo-tagline">Comprehensive Logistics Solutions</div>
-                <div class="services-list">
-                    <span class="service-item">Transportation</span>
-                    <span class="service-item">Fumigation</span>
-                    <span class="service-item">FHAT</span>
-                    <span class="service-item">WPM</span>
+<body class="gradient-bg min-h-screen flex items-center justify-center">
+    <div class="max-w-md w-full space-y-8 p-6">
+        <!-- Alert Messages -->
+        <?php if (!empty($success)): ?>
+            <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded-lg animate-fade-in">
+                <div class="flex items-center">
+                    <i class="fas fa-check-circle text-green-400 mr-3"></i>
+                    <p class="text-green-700"><?= htmlspecialchars($success) ?></p>
                 </div>
-                <div class="system-title">Fleet Management System</div>
             </div>
-        </div>
-        
-        <div class="login-content"> 
-            <?php if (!empty($error)): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-exclamation-circle"></i> 
-                    <?= htmlspecialchars($error) ?>
+        <?php endif; ?>
+        <?php if (!empty($error)): ?>
+            <div class="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg animate-fade-in">
+                <div class="flex items-center">
+                    <i class="fas fa-exclamation-circle text-red-400 mr-3"></i>
+                    <p class="text-red-700"><?= htmlspecialchars($error) ?></p>
                 </div>
-            <?php endif; ?>
-            
-            <form method="POST" id="loginForm">
-                <div class="form-group">
-                    <label for="username">Username</label>
-                    <div class="input-group">
-                        <i class="fas fa-user input-icon"></i>
-                        <input type="text" id="username" name="username" required placeholder="Enter your username">
+            </div>
+        <?php endif; ?>
+
+        <!-- Login Form -->
+        <div class="bg-white rounded-xl shadow-soft p-8 card-hover-effect">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-gray-900 mb-2">Welcome Back</h2>
+                <p class="text-sm text-gray-600">Sign in to your account</p>
+            </div>
+            <form method="POST" class="mt-8 space-y-6" novalidate>
+                <input type="hidden" name="login" value="1">
+                <div>
+                    <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
+                    <div class="mt-1 relative">
+                        <input type="text" id="username" name="username" required class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" placeholder="Enter username">
+                        <i class="fas fa-user absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
                     </div>
                 </div>
-                
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <div class="input-group">
-                        <i class="fas fa-lock input-icon"></i>
-                        <input type="password" id="password" name="password" required placeholder="Enter your password">
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                    <div class="mt-1 relative">
+                        <input type="password" id="password" name="password" required class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" placeholder="Enter password">
+                        <i class="fas fa-lock absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
                     </div>
                 </div>
-                
-                <button type="submit" class="btn" id="loginBtn">
-                    <i class="fas fa-sign-in-alt"></i> 
-                    <span>Sign In</span>
-                </button>
+                <div>
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500">
+                        <i class="fas fa-sign-in-alt mr-2"></i> Sign In
+                    </button>
+                </div>
             </form>
-            
-            <div class="footer-text">
-                Secure access to your fleet management dashboard
+            <div class="mt-4 text-center">
+                <p class="text-sm text-gray-600">Don't have an account? <a href="#signup" class="text-teal-600 hover:text-teal-800 font-medium" onclick="showSignupForm()">Sign Up</a></p>
             </div>
         </div>
+
+        <!-- Signup Form -->
+        <div id="signupForm" class="bg-white rounded-xl shadow-soft p-8 card-hover-effect hidden">
+            <div class="text-center">
+                <h2 class="text-3xl font-bold text-gray-900 mb-2">Create Account</h2>
+                <p class="text-sm text-gray-600">Sign up for an account</p>
+            </div>
+            <form method="POST" class="mt-8 space-y-6" novalidate>
+                <input type="hidden" name="signup" value="1">
+                <div>
+                    <label for="signup_username" class="block text-sm font-medium text-gray-700">Username *</label>
+                    <div class="mt-1 relative">
+                        <input type="text" id="signup_username" name="username" required class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" placeholder="Enter username">
+                        <i class="fas fa-user absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                    </div>
+                </div>
+                <div>
+                    <label for="signup_password" class="block text-sm font-medium text-gray-700">Password *</label>
+                    <div class="mt-1 relative">
+                        <input type="password" id="signup_password" name="password" required class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" placeholder="Enter password">
+                        <i class="fas fa-lock absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                    </div>
+                </div>
+                <div>
+                    <label for="signup_full_name" class="block text-sm font-medium text-gray-700">Full Name *</label>
+                    <div class="mt-1 relative">
+                        <input type="text" id="signup_full_name" name="full_name" required class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" placeholder="Enter full name">
+                        <i class="fas fa-user-tie absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                    </div>
+                </div>
+                <div>
+                    <label for="signup_email" class="block text-sm font-medium text-gray-700">Email *</label>
+                    <div class="mt-1 relative">
+                        <input type="email" id="signup_email" name="email" required class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500" placeholder="Enter email">
+                        <i class="fas fa-envelope absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                    </div>
+                </div>
+                <div>
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500">
+                        <i class="fas fa-user-plus mr-2"></i> Sign Up
+                    </button>
+                </div>
+            </form>
+            <div class="mt-4 text-center">
+                <p class="text-sm text-gray-600">Already have an account? <a href="#login" class="text-teal-600 hover:text-teal-800 font-medium" onclick="showLoginForm()">Sign In</a></p>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        document.getElementById('loginForm').addEventListener('submit', function() {
-            const btn = document.getElementById('loginBtn');
-            btn.classList.add('loading');
-            btn.querySelector('span').textContent = 'Signing In...';
-        });
+        function showSignupForm() {
+            document.querySelector('.card-hover-effect').classList.add('hidden');
+            document.getElementById('signupForm').classList.remove('hidden');
+        }
 
-        // Auto-focus username field
-        document.getElementById('username').focus();
-
-        // Add enter key support
-        document.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                document.getElementById('loginForm').submit();
-            }
-        });
+        function showLoginForm() {
+            document.getElementById('signupForm').classList.add('hidden');
+            document.querySelector('.card-hover-effect').classList.remove('hidden');
+        }
     </script>
 </body>
 </html>

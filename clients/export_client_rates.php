@@ -1,7 +1,7 @@
 <?php
 session_start();
-require 'auth_check.php';
-require 'db_connection.php';
+require '../auth_check.php';
+require '../db_connection.php';
 
 try {
     $clientId = $_GET['client_id'] ?? null;
