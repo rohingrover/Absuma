@@ -170,11 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $container_type = $typeValid ? $rawType : null;
 
                     $number1 = null; $number2 = null;
-                    if ($container_type === '20ft') {
-                        $number1 = isset($container_numbers[$number_index]) && $container_numbers[$number_index] !== '' ? trim($container_numbers[$number_index]) : null;
-                        $number2 = isset($container_numbers[$number_index + 1]) && $container_numbers[$number_index + 1] !== '' ? trim($container_numbers[$number_index + 1]) : null;
-                        $number_index += 2;
-                    } elseif ($container_type === '40ft') {
+                    if ($container_type === '20ft' || $container_type === '40ft') {
                         $number1 = isset($container_numbers[$number_index]) && $container_numbers[$number_index] !== '' ? trim($container_numbers[$number_index]) : null;
                         $number2 = null;
                         $number_index += 1;
@@ -188,8 +184,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $container_to_id = isset($container_to_location_ids[$i]) && $container_to_location_ids[$i] !== '' ? (int)$container_to_location_ids[$i] : null;
 
                         if ($same_locations_all) {
-                            if ($container_from_id === null) { $container_from_id = $from_location_id; }
-                            if ($container_to_id === null) { $container_to_id = $to_location_id; }
+                            $container_from_id = $from_location_id;
+                            $container_to_id = $to_location_id;
                         } else {
                             if ($container_from_id === null) { $container_from_id = $from_location_id; }
                             if ($container_to_id === null) { $container_to_id = $to_location_id; }
@@ -287,9 +283,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
-            --absuma-red: #dc2625;
-            --absuma-red-light: #fef2f2;
-            --absuma-red-dark: #b91c1c;
+            --absuma-red: #0d9488; /* teal-600 */
+            --absuma-red-light: #f0fdfa; /* teal-50 */
+            --absuma-red-dark: #0f766e; /* teal-700 */
         }
         
         .text-absuma-red { color: var(--absuma-red); }
@@ -299,7 +295,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         .hover\:text-absuma-red:hover { color: var(--absuma-red); }
         
         .gradient-bg {
-            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            background: linear-gradient(135deg, #f0fdfa 0%, #e6fffa 100%);
             min-height: 100vh;
         }
         
@@ -325,7 +321,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         .animation-delay-300 { animation-delay: 0.3s; }
         
         .form-input {
-            @apply w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-200;
+            @apply w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all duration-200;
         }
         
         .form-label {
@@ -382,7 +378,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         .autocomplete-item-icon {
             width: 8px;
             height: 8px;
-            background: #dc2625;
+            background: #0d9488;
             border-radius: 50%;
             flex-shrink: 0;
         }
@@ -436,8 +432,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         
         .input-enhanced:focus {
             outline: none;
-            border-color: #dc2625;
-            box-shadow: 0 0 0 3px rgba(220, 38, 37, 0.1), 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border-color: #0d9488;
+            box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.1), 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             transform: scale(1.02);
         }
         
@@ -456,10 +452,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
             transform: translateY(-2px);
         }
         
-        .btn-primary-enhanced {
-            background-color: #dc2625;
-            color: white;
-        }
+        .btn-primary-enhanced { background-color: #0d9488; color: white; }
         
         .btn-primary-enhanced:hover {
             background-color: #b91c1c;
@@ -487,7 +480,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         .form-section-icon {
             width: 40px;
             height: 40px;
-            background-color: #dc2625;
+            background-color: #0d9488;
             color: white;
             border-radius: 8px;
             display: flex;
@@ -521,11 +514,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         }
         
         /* Ensure buttons are not white */
-        button[type="submit"] {
-            background: linear-gradient(135deg, #dc2625 0%, #b91c1c 100%) !important;
-            color: white !important;
-            border: none !important;
-        }
+        button[type="submit"] { background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%) !important; color: white !important; border: none !important; }
         
         button[type="submit"]:hover {
             background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%) !important;
@@ -573,8 +562,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         }
         
         .autocomplete-item.active {
-            background-color: #fef2f2;
-            border-left: 3px solid #dc2625;
+            background-color: #f0fdfa;
+            border-left: 3px solid #0d9488;
         }
         
         /* Ensure input has rounded bottom when dropdown is open */
@@ -610,9 +599,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         .stagger-animation > *:nth-child(5) { animation-delay: 0.5s; }
         
         /* Enhanced input focus states */
-        .input-enhanced:focus {
-            @apply ring-2 ring-red-500 ring-opacity-50 border-red-500 shadow-lg;
-        }
+        .input-enhanced:focus { @apply ring-2 ring-teal-500 ring-opacity-50 border-teal-500 shadow-lg; }
         
         /* Loading state for button */
         .btn-loading {
@@ -666,61 +653,12 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
     </style>
 </head>
 <body class="gradient-bg">
-    <div class="min-h-screen">
-        <!-- Header with Absuma Branding -->
-        <?php include '../header_component.php'; ?>
+    <div class="min-h-screen flex">
+        <?php include '../sidebar_navigation.php'; ?>
 
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="flex flex-col lg:flex-row gap-6">
-                <!-- Sidebar with Absuma colors -->
-                <aside class="w-full lg:w-64 flex-shrink-0">
-                    <div class="bg-white rounded-xl shadow-soft p-4 sticky top-20 border border-white/20 backdrop-blur-sm bg-white/70">
-                        <!-- Booking Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Booking Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="create.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-absuma-red bg-red-50 rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red"></i>Create Booking
-                                </a>
-                                <a href="manage.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red"></i>Manage Bookings
-                                </a>
-                            </nav>
-                        </div>
-                        
-                        <!-- Vehicle Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Vehicle Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="../add_vehicle.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Add Vehicle & Driver
-                                </a>
-                                <a href="../manage_vehicles.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Vehicles
-                                </a>
-                                <a href="../manage_drivers.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-users w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Manage Drivers
-                                </a>
-                            </nav>
-                        </div>
-                        
-                        <!-- Client Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Client Section</h3>
-                            <nav class="space-y-1">
-                                <a href="../add_client.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red"></i> Register Client
-                                </a>
-                                <a href="../manage_clients.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i> Manage Clients
-                                </a>
-                            </nav>
-                        </div>
-                    </div>
-                </aside>
-
-                <!-- Main Content -->
-                <main class="flex-1">
+        <div class="flex-1 flex flex-col">
+            <main class="flex-1 p-6 overflow-auto">
+                <div class="max-w-7xl mx-auto">
                     <div class="space-y-4">
                         <!-- Page Header -->
                         <div class="bg-white rounded-xl shadow-soft p-6 border-l-4 border-absuma-red">
@@ -732,15 +670,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                     </h2>
                                     <p class="text-gray-600">Update the container booking details below</p>
                                 </div>
-                                <div class="hidden md:block">
-                                    <div class="bg-red-50 p-4 rounded-lg">
-                                        <i class="fas fa-clipboard-list text-3xl text-absuma-red"></i>
-                                    </div>
-                                </div>
                             </div>
                             
                             <!-- Booking ID Input Section -->
-                            <div class="mt-4 p-4 bg-gradient-to-r from-red-50 to-red-100 rounded-lg border border-red-200">
+                            <div class="mt-4 p-4 bg-gradient-to-r from-teal-50 to-teal-100 rounded-lg border border-teal-200">
                                 <div class="flex items-center gap-3 mb-4">
                                     <div class="w-10 h-10 bg-absuma-red text-white rounded-full flex items-center justify-center">
                                         <i class="fas fa-hashtag text-sm"></i>
@@ -961,7 +894,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                 <!-- Form Actions -->
                                 <div class="bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-200">
                                     <div class="flex flex-col sm:flex-row gap-4">
-                                        <button type="submit" class="group relative overflow-hidden bg-gradient-to-r from-absuma-red to-red-600 hover:from-red-600 hover:to-absuma-red text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 hover:shadow-lg shadow-md flex items-center justify-center text-sm">
+                                        <button type="submit" class="group relative overflow-hidden bg-gradient-to-r from-absuma-red to-teal-700 hover:from-teal-700 hover:to-absuma-red text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 hover:shadow-lg shadow-md flex items-center justify-center text-sm">
                                             <div class="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                                             <div class="relative flex items-center">
                                                 <i class="fas fa-shipping-fast mr-2 text-sm group-hover:animate-pulse"></i>
@@ -1016,7 +949,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                     dropdown.innerHTML = '<div class="p-3 text-gray-500 text-sm">No clients found</div>';
                 } else {
                     dropdown.innerHTML = clients.map((client, index) => 
-                        '<div class="autocomplete-item p-3 cursor-pointer hover:bg-red-50 border-b border-gray-100 transition-colors" ' +
+                        '<div class="autocomplete-item p-3 cursor-pointer hover:bg-teal-50 border-b border-gray-100 transition-colors" ' +
                         'data-value="' + client.id + '" data-text="' + client.client_name + ' (' + client.client_code + ')">' +
                         '<div class="font-medium text-gray-900">' + client.client_name + '</div>' +
                         '<div class="text-sm text-gray-500">' + client.client_code + '</div>' +
@@ -1149,7 +1082,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                 
                 if (filtered.length > 0) {
                     dropdown.innerHTML = filtered.map(loc => 
-                        `<div class="autocomplete-item p-3 cursor-pointer hover:bg-red-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
+                        `<div class="autocomplete-item p-3 cursor-pointer hover:bg-teal-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
                             <div class="font-medium text-gray-900">${loc.location}</div>
                         </div>`
                     ).join('');
@@ -1173,7 +1106,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                 
                 if (filtered.length > 0) {
                     dropdown.innerHTML = filtered.map(loc => 
-                        `<div class="autocomplete-item p-3 cursor-pointer hover:bg-red-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
+                        `<div class="autocomplete-item p-3 cursor-pointer hover:bg-teal-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
                             <div class="font-medium text-gray-900">${loc.location}</div>
                         </div>`
                     ).join('');
@@ -1276,22 +1209,22 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                         '</div>' +
                         '<div class="flex-1">' +
                             '<h4 class="font-medium text-gray-900">Container ' + i + '</h4>' +
-                            '<p class="text-sm text-gray-500">Configure type and container numbers</p>' +
+                            '<p class="text-sm text-gray-500">Configure size and container number</p>' +
                         '</div>' +
                     '</div>' +
                     
                     '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">' +
                         '<div>' +
-                            '<label class="block text-sm font-medium text-gray-700 mb-1">Container Type</label>' +
+                            '<label class="block text-sm font-medium text-gray-700 mb-1">Container Size</label>' +
                             '<select name="container_types[]" id="container_type_' + i + '" class="input-enhanced" onchange="updateContainerNumbers(' + i + ')">' +
-                                '<option value="">Select type</option>' +
-                                '<option value="20ft">20ft Container (2 numbers)</option>' +
-                                '<option value="40ft">40ft Container (1 number)</option>' +
+                                '<option value="">Select size</option>' +
+                                '<option value="20ft">20ft</option>' +
+                                '<option value="40ft">40ft</option>' +
                             '</select>' +
                         '</div>' +
                         '<div id="container_numbers_' + i + '">' +
-                            '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers</label>' +
-                            '<div class="text-sm text-gray-500">Select container type first</div>' +
+                            '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number</label>' +
+                            '<div class="text-sm text-gray-500">Select container size first</div>' +
                         '</div>' +
                     '</div>' +
                     
@@ -1322,7 +1255,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                     '</div>' +
                     
                     '<div class="mt-3 flex justify-end">' +
-                        '<button type="button" class="text-sm text-gray-500 hover:text-red-500 hover:bg-red-50 px-2 py-1 rounded transition-colors" ' +
+                        '<button type="button" class="text-sm text-gray-500 hover:text-teal-600 hover:bg-teal-50 px-2 py-1 rounded transition-colors" ' +
                                 'onclick="clearContainerField(' + i + ')" title="Clear container ' + i + '">' +
                             '<i class="fas fa-times mr-1"></i>Clear' +
                         '</button>' +
@@ -1356,21 +1289,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
             const containerType = document.getElementById('container_type_' + containerIndex).value;
             const numbersContainer = document.getElementById('container_numbers_' + containerIndex);
             
-            if (containerType === '20ft') {
-                numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers</label>' +
-                    '<div class="space-y-2">' +
-                        '<input type="text" name="container_numbers[]" placeholder="First container number (alphanumeric)" ' +
-                               'class="input-enhanced" maxlength="30" pattern="[A-Za-z0-9- ]*">' +
-                        '<input type="text" name="container_numbers[]" placeholder="Second container number (alphanumeric)" ' +
-                               'class="input-enhanced" maxlength="30" pattern="[A-Za-z0-9- ]*">' +
-                    '</div>';
-            } else if (containerType === '40ft') {
+            if (containerType === '20ft' || containerType === '40ft') {
                 numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number</label>' +
                     '<input type="text" name="container_numbers[]" placeholder="Container number (alphanumeric)" ' +
                            'class="input-enhanced" maxlength="30" pattern="[A-Za-z0-9- ]*">';
             } else {
-                numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers</label>' +
-                    '<div class="text-sm text-gray-500">Select container type first</div>';
+                numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number</label>' +
+                    '<div class="text-sm text-gray-500">Select container size first</div>';
             }
         }
         
@@ -1385,8 +1310,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
             // Reset container numbers section
             const numbersContainer = document.getElementById('container_numbers_' + containerNumber);
             if (numbersContainer) {
-                numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers</label>' +
-                    '<div class="text-sm text-gray-500">Select container type first</div>';
+                numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number</label>' +
+                    '<div class="text-sm text-gray-500">Select container size first</div>';
             }
         }
         

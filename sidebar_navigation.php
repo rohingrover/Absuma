@@ -13,8 +13,16 @@ $base_slashes = 1; // Assuming structure like /absuma/page.php or /absuma/sub/pa
 $levels = max(0, $slash_count - $base_slashes);
 $relative_to_root = str_repeat('../', $levels);
 
-// Normalize current page path (strip the main folder, e.g., /absuma)
-$normalized_current = preg_replace('|^/[^/]+|', '', $php_self);
+// Normalize current page path robustly (supports root or subfolder deploys)
+// Examples:
+//  - /booking/manage.php            => /booking/manage.php
+//  - /absuma/booking/manage.php     => /booking/manage.php
+//  - /dashboard.php                 => /dashboard.php
+$script_path = $_SERVER['SCRIPT_NAME'] ?? $php_self;
+$normalized_current = $script_path;
+if (preg_match('#^/(?:[^/]+/)?([^/]+/[^/]+)$#', $script_path, $m)) {
+    $normalized_current = '/' . $m[1];
+}
 
 // Function to check if user has permission for a specific role level
 if (!function_exists('hasRoleAccess')) {

@@ -255,13 +255,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $typeValid = ($rawType === '20ft' || $rawType === '40ft');
                     $container_type = $typeValid ? $rawType : null;
 
-                    // Determine container numbers based on type (if known), else accept none
+                    // Determine container numbers based on size (single number for both 20ft and 40ft)
                     $number1 = null; $number2 = null;
-                    if ($container_type === '20ft') {
-                        $number1 = isset($container_numbers[$number_index]) && $container_numbers[$number_index] !== '' ? trim($container_numbers[$number_index]) : null;
-                        $number2 = isset($container_numbers[$number_index + 1]) && $container_numbers[$number_index + 1] !== '' ? trim($container_numbers[$number_index + 1]) : null;
-                        $number_index += 2;
-                    } elseif ($container_type === '40ft') {
+                    if ($container_type === '20ft' || $container_type === '40ft') {
                         $number1 = isset($container_numbers[$number_index]) && $container_numbers[$number_index] !== '' ? trim($container_numbers[$number_index]) : null;
                         $number2 = null;
                         $number_index += 1;
@@ -308,9 +304,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         }
                         
                         if ($same_locations_all) {
-                            if ($container_from_id === null) { $container_from_id = $from_location_id; }
-                            if ($container_to_id === null) { $container_to_id = $to_location_id; }
+                            // Override per-container locations with global From/To when checkbox is checked
+                            $container_from_id = $from_location_id;
+                            $container_to_id = $to_location_id;
                         } else {
+                            // Fallback: if per-container missing, use global
                             if ($container_from_id === null) { $container_from_id = $from_location_id; }
                             if ($container_to_id === null) { $container_to_id = $to_location_id; }
                         }
@@ -720,7 +718,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         <?php include '../sidebar_navigation.php'; ?>
 
         <!-- Main Content -->
-        <div class="flex-1 flex flex-col">
+        <div class="flex-1 flex flex-col text-gray-900">
             <!-- Header -->
             <header class="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
                 <div class="flex items-center justify-between">
@@ -1330,22 +1328,22 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                     '</div>' +
                     '<div class="flex-1">' +
                         '<h4 class="font-medium text-gray-900">Container ' + i + '</h4>' +
-                        '<p class="text-sm text-gray-500">Configure type and container numbers</p>' +
+                        '<p class="text-sm text-gray-500">Configure size and container number</p>' +
                     '</div>' +
                 '</div>' +
                 
                 '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">' +
                     '<div>' +
-                        '<label class="block text-sm font-medium text-gray-700 mb-1">Container Type</label>' +
+                        '<label class="block text-sm font-medium text-gray-700 mb-1">Container Size</label>' +
                         '<select name="container_types[]" id="container_type_' + i + '" class="input-enhanced" onchange="updateContainerNumbers(event, ' + i + ')">' +
-                            '<option value="">Select type</option>' +
-                            '<option value="20ft">20ft Container (2 numbers)</option>' +
-                            '<option value="40ft">40ft Container (1 number)</option>' +
+                            '<option value="">Select size</option>' +
+                            '<option value="20ft">20ft</option>' +
+                            '<option value="40ft">40ft</option>' +
                         '</select>' +
                     '</div>' +
                     '<div id="container_numbers_' + i + '">' +
-                        '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers</label>' +
-                        '<div class="text-sm text-gray-500">Select container type first</div>' +
+                        '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number</label>' +
+                        '<div class="text-sm text-gray-500">Select container size first</div>' +
                     '</div>' +
                 '</div>' +
                 
@@ -1415,21 +1413,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         const containerType = document.getElementById('container_type_' + containerIndex).value;
         const numbersContainer = document.getElementById('container_numbers_' + containerIndex);
         
-        if (containerType === '20ft') {
-            numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers *</label>' +
-                '<div class="space-y-2">' +
-                    '<input type="text" name="container_numbers[]" placeholder="First container number" ' +
-                           'class="input-enhanced" maxlength="20" required>' +
-                    '<input type="text" name="container_numbers[]" placeholder="Second container number" ' +
-                           'class="input-enhanced" maxlength="20" required>' +
-                '</div>';
-        } else if (containerType === '40ft') {
+        if (containerType === '20ft' || containerType === '40ft') {
             numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number *</label>' +
                 '<input type="text" name="container_numbers[]" placeholder="Container number" ' +
                        'class="input-enhanced" maxlength="20" required>';
         } else {
-            numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers</label>' +
-                '<div class="text-sm text-gray-500">Select container type first</div>';
+            numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number</label>' +
+                '<div class="text-sm text-gray-500">Select container size first</div>';
         }
     }
     
@@ -1444,11 +1434,30 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         // Reset container numbers section
         const numbersContainer = document.getElementById('container_numbers_' + containerNumber);
         if (numbersContainer) {
-            numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Numbers</label>' +
-                '<div class="text-sm text-gray-500">Select container type first</div>';
+            numbersContainer.innerHTML = '<label class="block text-sm font-medium text-gray-700 mb-1">Container Number</label>' +
+                '<div class="text-sm text-gray-500">Select container size first</div>';
         }
     }
     
+    // Apply global From/To locations to all per-container fields when enabled
+    function applyGlobalLocationsToContainers() {
+        const sameAll = document.getElementById('same_locations_all');
+        if (!sameAll || !sameAll.checked) return;
+        const fromName = document.getElementById('from_location') ? document.getElementById('from_location').value || '' : '';
+        const fromId = document.getElementById('from_location_id') ? document.getElementById('from_location_id').value || '' : '';
+        const toName = document.getElementById('to_location') ? document.getElementById('to_location').value || '' : '';
+        const toId = document.getElementById('to_location_id') ? document.getElementById('to_location_id').value || '' : '';
+        const count = parseInt(document.getElementById('no_of_containers') ? document.getElementById('no_of_containers').value : '0') || 0;
+        for (let i = 1; i <= count; i++) {
+            const fromInput = document.getElementById('container_from_location_' + i);
+            const fromHidden = document.getElementById('container_from_location_id_' + i);
+            const toInput = document.getElementById('container_to_location_' + i);
+            const toHidden = document.getElementById('container_to_location_id_' + i);
+            if (fromInput && fromHidden) { fromInput.value = fromName; fromHidden.value = fromId; }
+            if (toInput && toHidden) { toInput.value = toName; toHidden.value = toId; }
+        }
+    }
+
     // Initialize everything when DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
         console.log('DOM loaded, initializing all functionality...');
@@ -1516,8 +1525,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         }
         
         // Add event listeners for dynamic field generation
-        document.getElementById('no_of_containers').addEventListener('input', generateContainerFields);
-        document.getElementById('no_of_containers').addEventListener('change', generateContainerFields);
+        document.getElementById('no_of_containers').addEventListener('input', function(){
+            generateContainerFields();
+            // Re-apply global locations if enabled after regenerating fields
+            applyGlobalLocationsToContainers();
+        });
+        document.getElementById('no_of_containers').addEventListener('change', function(){
+            generateContainerFields();
+            applyGlobalLocationsToContainers();
+        });
         
         // Sync booking ID fields and preview approval requirements
         document.getElementById('booking_id').addEventListener('input', function() {
@@ -1525,6 +1541,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
             document.getElementById('booking_id_hidden').value = bookingId;
             previewApprovalRequirements(bookingId);
         });
+
+        // Same for all checkbox behavior: apply immediately and on global changes
+        const sameAll = document.getElementById('same_locations_all');
+        if (sameAll) {
+            sameAll.addEventListener('change', applyGlobalLocationsToContainers);
+        }
+        const fromInput = document.getElementById('from_location');
+        const toInput = document.getElementById('to_location');
+        if (fromInput) fromInput.addEventListener('input', function(){ applyGlobalLocationsToContainers(); });
+        if (toInput) toInput.addEventListener('input', function(){ applyGlobalLocationsToContainers(); });
     });
 
     // Location Modal Functions

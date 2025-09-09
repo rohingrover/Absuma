@@ -96,9 +96,9 @@ if (empty($containers)) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
-            --absuma-red: #dc2625;
-            --absuma-red-light: #fef2f2;
-            --absuma-red-dark: #b91c1c;
+            --absuma-red: #0d9488; /* teal-600 */
+            --absuma-red-light: #f0fdfa; /* teal-50 */
+            --absuma-red-dark: #0f766e; /* teal-700 */
         }
         
         .text-absuma-red { color: var(--absuma-red); }
@@ -108,7 +108,7 @@ if (empty($containers)) {
         .hover\:text-absuma-red:hover { color: var(--absuma-red); }
         
         .gradient-bg {
-            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            background: linear-gradient(135deg, #f0fdfa 0%, #e6fffa 100%);
             min-height: 100vh;
         }
         
@@ -118,74 +118,14 @@ if (empty($containers)) {
     </style>
 </head>
 <body class="gradient-bg overflow-x-hidden">
-    <div class="min-h-screen">
-        <?php include '../header_component.php'; ?>
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="flex flex-col lg:flex-row gap-6">
-                <!-- Sidebar with Absuma colors -->
-                <aside class="w-full lg:w-64 flex-shrink-0">
-                    <div class="bg-white rounded-xl shadow-soft p-4 sticky top-20 border border-white/20 backdrop-blur-sm bg-white/70">
-                        <!-- Booking Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Booking Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="create.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Create Booking
-                                </a>
-                                <a href="manage.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-absuma-red bg-red-50 rounded-lg transition-all group">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red"></i>Manage Bookings
-                                </a>
-                            </nav>
-                        </div>
-                        
-                        <!-- Location Section -->
-                        <?php if (in_array($_SESSION['role'], ['l2_supervisor', 'manager1', 'manager2', 'admin', 'superadmin'])): ?>
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Location Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="../location/create.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Add Location
-                                </a>
-                                <a href="../location/manage.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Locations
-                                </a>
-                            </nav>
-                        </div>
-                        <?php endif; ?>
-                        
-                        <!-- Vehicle Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Vehicle Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="../manage_vehicles.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Add Vehicle & Driver
-                                </a>
-                                <a href="../manage_vehicles.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-truck w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Vehicles
-                                </a>
-                                <a href="../manage_drivers.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-users w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Drivers
-                                </a>
-                            </nav>
-                        </div>
-                        
-                        <!-- Client Section -->
-                        <div class="mb-6">
-                            <h3 class="text-xs uppercase tracking-wider text-absuma-red font-bold mb-3 pl-2 border-l-4 border-absuma-red/50">Client Section</h3>
-                            <nav class="space-y-1.5">
-                                <a href="../manage_clients.php" class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-dark hover:bg-red-50 hover:text-absuma-red rounded-lg transition-all group">
-                                    <i class="fas fa-plus w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Register Client
-                                </a>
-                                <a href="../manage_clients.php" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-red-50 hover:text-absuma-red rounded-md transition-colors">
-                                    <i class="fas fa-list w-5 text-center text-absuma-red group-hover:text-absuma-red"></i>Manage Clients
-                                </a>
-                            </nav>
-                        </div>
-                    </div>
-                </aside>
+    <div class="min-h-screen flex">
+        <!-- Sidebar -->
+        <?php include '../sidebar_navigation.php'; ?>
 
-                <!-- Main Content -->
-                <main class="flex-1">
+        <!-- Right content shell -->
+        <div class="flex-1 flex flex-col">
+            <main class="flex-1 p-6 overflow-auto">
+                <div class="max-w-7xl mx-auto">
                     <div class="bg-white rounded-xl shadow-soft p-6 border-l-4 border-absuma-red">
                         <div class="flex items-center justify-between mb-4">
                             <h1 class="text-xl font-bold text-gray-800">
@@ -232,7 +172,7 @@ if (empty($containers)) {
                                 <thead class="bg-gray-100">
                                     <tr>
                                         <th class="text-left px-4 py-2">#</th>
-                                        <th class="text-left px-4 py-2">Type</th>
+                                        <th class="text-left px-4 py-2">Size</th>
                                         <th class="text-left px-4 py-2">Number(s)</th>
                                         <th class="text-left px-4 py-2">From</th>
                                         <th class="text-left px-4 py-2">To</th>
@@ -268,8 +208,8 @@ if (empty($containers)) {
                         </div>
                     <?php endif; ?>
                     </div>
+                    </div>
                 </main>
-            </div>
         </div>
     </div>
 </body>
