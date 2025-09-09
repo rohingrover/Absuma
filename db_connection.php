@@ -3,7 +3,7 @@
 $host = 'srv948.hstgr.io';
 $db   = 'u689210721_absuma';
 $user = 'u689210721_absuma';
-$pass ='G2zb*Cw~mNQ/';
+$pass = 'G2zb*Cw~mNQ/';
 $charset = 'utf8mb4';
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
