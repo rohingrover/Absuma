@@ -45,6 +45,9 @@ if (!function_exists('getActiveSection')) {
             // Dashboard
             '/dashboard.php' => 'dashboard',
             
+            // User Profile
+            '/user_profile.php' => 'profile',
+            
             // Vehicle Management
             '/vehicles/manage.php' => 'vehicle',
             '/vehicles/add.php' => 'vehicle',
@@ -61,6 +64,8 @@ if (!function_exists('getActiveSection')) {
             // Booking Management
             '/booking/create.php' => 'booking',
             '/booking/manage.php' => 'booking',
+            '/booking/edit.php' => 'booking',
+            '/booking/view.php' => 'booking',
             
             // Client Management
             '/clients/manage_clients.php' => 'client',
@@ -123,7 +128,7 @@ if (canApprove($user_role)) {
             <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center">
                 <i class="fas fa-user-tie text-teal-600 text-lg"></i>
             </div>
-            <div>
+            <div class="flex-1">
                 <h2 class="text-lg font-semibold"><?= htmlspecialchars($user_name) ?></h2>
                 <p class="text-teal-200 text-sm capitalize"><?= str_replace('_', ' ', $user_role) ?></p>
             </div>
@@ -228,7 +233,7 @@ if (canApprove($user_role)) {
                         <i class="fas fa-calendar-plus w-5"></i>
                         <span>Create Booking</span>
                     </a>
-                    <a href="<?= $relative_to_root ?>booking/manage.php" class="nav-item <?= $normalized_current == '/booking/manage.php' ? 'nav-active' : 'text-teal-100' ?> flex items-center space-x-3 px-4 py-3 rounded-lg font-medium ml-4">
+                    <a href="<?= $relative_to_root ?>booking/manage.php" class="nav-item <?= in_array($normalized_current, ['/booking/manage.php','/booking/edit.php','/booking/view.php']) ? 'nav-active' : 'text-teal-100' ?> flex items-center space-x-3 px-4 py-3 rounded-lg font-medium ml-4">
                         <i class="fas fa-calendar-alt w-5"></i>
                         <span>Manage Bookings</span>
                     </a>
@@ -345,8 +350,12 @@ if (canApprove($user_role)) {
         </div>
     </nav>
 
-    <!-- Logout Section -->
-    <div class="p-4 border-t border-teal-500">
+    <!-- User Actions Section -->
+    <div class="p-4 border-t border-teal-500 space-y-2">
+        <a href="<?= $relative_to_root ?>user_profile.php" class="nav-item text-teal-100 hover:text-white flex items-center space-x-3 px-4 py-3 rounded-lg font-medium">
+            <i class="fas fa-user-edit w-5"></i>
+            <span>Edit Profile</span>
+        </a>
         <a href="<?= $relative_to_root ?>logout.php" class="nav-item text-teal-100 hover:text-red-300 flex items-center space-x-3 px-4 py-3 rounded-lg font-medium">
             <i class="fas fa-sign-out-alt w-5"></i>
             <span>Logout</span>

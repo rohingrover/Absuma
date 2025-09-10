@@ -1,4 +1,6 @@
 <?php
+// Set timezone to Asia/Kolkata for the entire application
+date_default_timezone_set('Asia/Kolkata');
 
 $host = 'srv948.hstgr.io';
 $db   = 'u689210721_absuma';
