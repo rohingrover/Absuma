@@ -2,8 +2,8 @@
 // request_details_api.php - API to fetch detailed request information for approval system
 
 session_start();
-require 'auth_check.php';
-require 'db_connection.php';
+require '../auth_check.php';
+require '../db_connection.php';
 
 header('Content-Type: application/json');
 

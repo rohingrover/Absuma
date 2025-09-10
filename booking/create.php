@@ -965,18 +965,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                 </div>
                             </div>
 
-                            <!-- Booking ID Preview for Approval Requirements -->
-                            <div id="approval-preview" class="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg hidden">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-8 h-8 bg-gray-600 text-white rounded-full flex items-center justify-center">
-                                        <i class="fas fa-eye text-sm"></i>
-                                    </div>
-                                    <div class="flex-1">
-                                        <h4 class="text-sm font-medium text-gray-800">Approval Requirements Preview</h4>
-                                        <p id="approval-preview-text" class="text-xs text-gray-600 mt-1"></p>
-                                    </div>
-                                </div>
-                            </div>
+                            
 
                             <!-- Container Details Section (Optional) -->
                             <div class="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
