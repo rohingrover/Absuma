@@ -303,6 +303,15 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
         
+        .card-hover-effect {
+            transition: all 0.3s ease;
+        }
+        
+        .card-hover-effect:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        
         .shadow-glow-red {
             box-shadow: 0 0 20px rgba(220, 38, 37, 0.3);
         }
@@ -517,7 +526,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         button[type="submit"] { background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%) !important; color: white !important; border: none !important; }
         
         button[type="submit"]:hover {
-            background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%) !important;
+            background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%) !important;
         }
         
         /* Fix dropdown styling */
@@ -632,7 +641,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         
         .generate-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px -5px rgba(220, 38, 37, 0.4);
+            box-shadow: 0 8px 25px -5px rgba(13, 148, 136, 0.4);
         }
         
         .generate-btn:active {
@@ -656,24 +665,30 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
     <div class="min-h-screen flex">
         <?php include '../sidebar_navigation.php'; ?>
 
+        <!-- Main Content -->
         <div class="flex-1 flex flex-col">
+            <!-- Header -->
+            <header class="bg-white shadow-sm border-b border-gray-200 px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <div>
+                            <h1 class="text-2xl font-bold text-gray-900">Edit Booking</h1>
+                            <p class="text-sm text-gray-600 mt-1">
+                                Update the container booking details below
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Content -->
             <main class="flex-1 p-6 overflow-auto">
                 <div class="max-w-7xl mx-auto">
-                    <div class="space-y-4">
-                        <!-- Page Header -->
+                    <div class="space-y-6">
+                        <!-- Booking ID Section -->
                         <div class="bg-white rounded-xl shadow-soft p-6 border-l-4 border-absuma-red">
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <h2 class="text-2xl font-bold text-gray-800 mb-2">
-                                        <i class="fas fa-shipping-fast text-absuma-red mr-3"></i>
-                                        Edit Booking
-                                    </h2>
-                                    <p class="text-gray-600">Update the container booking details below</p>
-                                </div>
-                            </div>
-                            
                             <!-- Booking ID Input Section -->
-                            <div class="mt-4 p-4 bg-gradient-to-r from-teal-50 to-teal-100 rounded-lg border border-teal-200">
+                            <div class="p-4 bg-gradient-to-r from-teal-50 to-teal-100 rounded-lg border border-teal-200">
                                 <div class="flex items-center gap-3 mb-4">
                                     <div class="w-10 h-10 bg-absuma-red text-white rounded-full flex items-center justify-center">
                                         <i class="fas fa-hashtag text-sm"></i>
@@ -722,7 +737,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                         <?php endif; ?>
 
                         <!-- Booking Form -->
-                        <div class="form-section fade-in-up">
+                        <div class="bg-white rounded-xl shadow-soft p-6 card-hover-effect">
                             <form method="POST" class="space-y-6">
                                 <input type="hidden" name="booking_id" id="booking_id_hidden">
                                 <!-- Basic Information Section -->

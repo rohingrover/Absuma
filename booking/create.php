@@ -726,11 +726,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                         <h1 class="text-2xl font-bold text-gray-900">Create Booking</h1>
                         <p class="text-sm text-gray-600 mt-1">Create new container booking requests</p>
                     </div>
-                    <div class="flex items-center space-x-4">
-                        <div class="bg-teal-50 px-4 py-2 rounded-lg">
-                            <span class="text-sm font-medium text-teal-800">Role: <?= ucfirst(str_replace('_', ' ', $user_role)) ?></span>
-                        </div>
-                    </div>
+                    <div class="flex items-center space-x-4"></div>
                 </div>
             </header>
 
