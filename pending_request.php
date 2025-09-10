@@ -1,3 +1,4 @@
+
 <?php
 session_start();
 require 'auth_check.php';
@@ -55,6 +56,24 @@ function handleOwnedVehicleAssignment($pdo, $data) {
     $vehicle_id = $data['vehicle_id'];
     $driver_notes = $data['driver_notes'] ?? '';
     
+    // Check if booking exists and is in pending status
+    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND status = 'pending'");
+    $stmt->execute([$booking_id]);
+    $booking = $stmt->fetch();
+    
+    if (!$booking) {
+        throw new Exception("Booking not found or not in pending status");
+    }
+    
+    // Check if vehicle is available
+    $stmt = $pdo->prepare("SELECT * FROM vehicles WHERE id = ? AND current_status IN ('available', 'idle') AND approval_status = 'approved'");
+    $stmt->execute([$vehicle_id]);
+    $vehicle = $stmt->fetch();
+    
+    if (!$vehicle) {
+        throw new Exception("Selected vehicle is not available");
+    }
+    
     // Update booking status to in_progress and assign vehicle
     $stmt = $pdo->prepare("
         UPDATE bookings 
@@ -70,12 +89,16 @@ function handleOwnedVehicleAssignment($pdo, $data) {
     ");
     $stmt->execute([$vehicle_id, $driver_notes, $_SESSION['user_id'], $_SESSION['user_id'], $booking_id]);
     
+    // Update vehicle status to assigned
+    $stmt = $pdo->prepare("UPDATE vehicles SET current_status = 'assigned' WHERE id = ?");
+    $stmt->execute([$vehicle_id]);
+    
     // Create activity log
     $stmt = $pdo->prepare("
         INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
         VALUES (?, 'vehicle_assigned', ?, ?, NOW())
     ");
-    $description = "Owned vehicle assigned by " . $_SESSION['full_name'];
+    $description = "Owned vehicle " . $vehicle['vehicle_number'] . " assigned by " . $_SESSION['full_name'];
     $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
 }
 
@@ -86,10 +109,37 @@ function handleVendorVehicleAssignment($pdo, $data) {
     $vehicle_details = $data['vehicle_details'];
     $driver_name = $data['driver_name'];
     $driver_contact = $data['driver_contact'];
-    $rate_per_day = $data['rate_per_day'];
-    $estimated_days = $data['estimated_days'];
+    $rate_per_day = floatval($data['rate_per_day']);
+    $estimated_days = intval($data['estimated_days']);
     $total_cost = $rate_per_day * $estimated_days;
     $notes = $data['vendor_notes'] ?? '';
+    
+    // Validate inputs
+    if ($rate_per_day <= 0) {
+        throw new Exception("Rate per day must be greater than 0");
+    }
+    
+    if ($estimated_days <= 0) {
+        throw new Exception("Estimated days must be greater than 0");
+    }
+    
+    // Check if booking exists and is in pending status
+    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND status = 'pending'");
+    $stmt->execute([$booking_id]);
+    $booking = $stmt->fetch();
+    
+    if (!$booking) {
+        throw new Exception("Booking not found or not in pending status");
+    }
+    
+    // Check if vendor exists and is active
+    $stmt = $pdo->prepare("SELECT * FROM vendors WHERE id = ? AND status = 'active'");
+    $stmt->execute([$vendor_id]);
+    $vendor = $stmt->fetch();
+    
+    if (!$vendor) {
+        throw new Exception("Selected vendor is not available");
+    }
     
     // Update booking status to pending_vendor_approval
     $stmt = $pdo->prepare("
@@ -120,14 +170,27 @@ function handleVendorVehicleAssignment($pdo, $data) {
         INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
         VALUES (?, 'vendor_vehicle_assigned', ?, ?, NOW())
     ");
-    $description = "Vendor vehicle assigned by " . $_SESSION['full_name'] . " - Awaiting manager approval";
+    $description = "Vendor vehicle from " . $vendor['company_name'] . " assigned by " . $_SESSION['full_name'] . " - Awaiting manager approval for rate ₹" . number_format($total_cost, 2);
     $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
 }
 
 // Function to handle booking rejection
 function handleBookingRejection($pdo, $data) {
     $booking_id = $data['booking_id'];
-    $rejection_reason = $data['rejection_reason'];
+    $rejection_reason = trim($data['rejection_reason']);
+    
+    if (empty($rejection_reason)) {
+        throw new Exception("Rejection reason is required");
+    }
+    
+    // Check if booking exists and is in pending status
+    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND status = 'pending'");
+    $stmt->execute([$booking_id]);
+    $booking = $stmt->fetch();
+    
+    if (!$booking) {
+        throw new Exception("Booking not found or not in pending status");
+    }
     
     // Update booking status to rejected
     $stmt = $pdo->prepare("
@@ -185,13 +248,13 @@ $stmt = $pdo->prepare("
 $stmt->execute();
 $owned_vehicles = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get active vendors
+// Get active vendors with corrected schema
 $vendors = [];
 $stmt = $pdo->prepare("
-    SELECT id, vendor_name, contact_person, phone, services
+    SELECT id, vendor_code, company_name, contact_person, mobile, email, vendor_type, total_vehicles
     FROM vendors 
     WHERE status = 'active'
-    ORDER BY vendor_name
+    ORDER BY company_name
 ");
 $stmt->execute();
 $vendors = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -206,16 +269,49 @@ $stats = [
 // Get container details for each booking
 foreach ($pending_bookings as &$booking) {
     $stmt = $pdo->prepare("
-        SELECT container_sequence, container_type, container_number_1, container_number_2
+        SELECT container_sequence, container_type, container_number_1, container_number_2,
+               from_location_id, to_location_id
         FROM booking_containers 
         WHERE booking_id = ? 
         ORDER BY container_sequence
     ");
     $stmt->execute([$booking['id']]);
-    $booking['containers'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $containers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Get location names for containers if they have individual locations
+    foreach ($containers as &$container) {
+        if ($container['from_location_id']) {
+            $stmt = $pdo->prepare("SELECT location FROM location WHERE id = ?");
+            $stmt->execute([$container['from_location_id']]);
+            $result = $stmt->fetch();
+            $container['from_location_name'] = $result ? $result['location'] : null;
+        }
+        
+        if ($container['to_location_id']) {
+            $stmt = $pdo->prepare("SELECT location FROM location WHERE id = ?");
+            $stmt->execute([$container['to_location_id']]);
+            $result = $stmt->fetch();
+            $container['to_location_name'] = $result ? $result['location'] : null;
+        }
+    }
+    
+    $booking['containers'] = $containers;
 }
-?>
 
+// Get recent activities for dashboard (optional)
+$recent_activities = [];
+$stmt = $pdo->prepare("
+    SELECT ba.*, b.booking_id, u.full_name as user_name
+    FROM booking_activities ba
+    LEFT JOIN bookings b ON ba.booking_id = b.id
+    LEFT JOIN users u ON ba.created_by = u.id
+    WHERE ba.created_by = ?
+    ORDER BY ba.created_at DESC
+    LIMIT 10
+");
+$stmt->execute([$_SESSION['user_id']]);
+$recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -487,7 +583,7 @@ foreach ($pending_bookings as &$booking) {
                             </div>
                             <h3 class="text-xl font-semibold text-gray-900 mb-2">No Pending Requests</h3>
                             <p class="text-gray-600 mb-6">All booking requests have been processed. Great job!</p>
-                            <a href="booking/dashboard.php" class="btn-enhanced btn-primary">
+                            <a href="dashboard.php" class="btn-enhanced btn-primary">
                                 <i class="fas fa-tachometer-alt mr-2"></i>
                                 Go to Dashboard
                             </a>
@@ -559,6 +655,16 @@ foreach ($pending_bookings as &$booking) {
                                                                 <p>№2: <?= htmlspecialchars($container['container_number_2']) ?></p>
                                                             <?php endif; ?>
                                                         </div>
+                                                        <?php if (isset($container['from_location_name']) || isset($container['to_location_name'])): ?>
+                                                            <div class="text-xs text-blue-600 mt-2 border-t border-gray-200 pt-2">
+                                                                <?php if (isset($container['from_location_name'])): ?>
+                                                                    <p>From: <?= htmlspecialchars($container['from_location_name']) ?></p>
+                                                                <?php endif; ?>
+                                                                <?php if (isset($container['to_location_name'])): ?>
+                                                                    <p>To: <?= htmlspecialchars($container['to_location_name']) ?></p>
+                                                                <?php endif; ?>
+                                                            </div>
+                                                        <?php endif; ?>
                                                     </div>
                                                 <?php endforeach; ?>
                                             </div>
@@ -606,6 +712,69 @@ foreach ($pending_bookings as &$booking) {
                 </div>
                 
                 <form method="POST" class="space-y-4">
+                    <input type="hidden" name="action" value="assign_owned_vehicle">
+                    <input type="hidden" name="booking_id" id="owned_booking_id">
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-truck text-teal-600 mr-2"></i>Select Vehicle *
+                        </label>
+                        <select name="vehicle_id" class="input-enhanced" required>
+                            <option value="">Choose available vehicle...</option>
+                            <?php foreach ($owned_vehicles as $vehicle): ?>
+                                <option value="<?= $vehicle['id'] ?>">
+                                    <?= htmlspecialchars($vehicle['vehicle_number']) ?> - 
+                                    <?= htmlspecialchars($vehicle['make_model']) ?>
+                                    <?php if ($vehicle['driver_name']): ?>
+                                        (Driver: <?= htmlspecialchars($vehicle['driver_name']) ?>)
+                                    <?php endif; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-sticky-note text-teal-600 mr-2"></i>Driver Notes
+                        </label>
+                        <textarea name="driver_notes" rows="3" class="input-enhanced" 
+                                  placeholder="Any special instructions or notes for the driver..."></textarea>
+                    </div>
+                    
+                    <div class="flex gap-3 pt-4">
+                        <button type="submit" class="btn-enhanced btn-primary flex-1">
+                            <i class="fas fa-check mr-2"></i>Assign Vehicle
+                        </button>
+                        <button type="button" onclick="closeModal('ownedVehicleModal')" class="btn-enhanced btn-secondary">
+                            <i class="fas fa-times mr-2"></i>Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vendor Vehicle Assignment Modal -->
+    <div id="vendorVehicleModal" class="modal">
+        <div class="modal-content">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold text-gray-900">Assign Vendor Vehicle</h3>
+                    <button onclick="closeModal('vendorVehicleModal')" class="text-gray-400 hover:text-gray-600">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-triangle text-yellow-600 mr-2"></i>
+                        <span class="text-sm text-yellow-800 font-medium">
+                            Vendor vehicle assignments require manager approval for rates
+                        </span>
+                    </div>
+                </div>
+                
+                <form method="POST" class="space-y-4">
                     <input type="hidden" name="action" value="assign_vendor_vehicle">
                     <input type="hidden" name="booking_id" id="vendor_booking_id">
                     
@@ -617,8 +786,11 @@ foreach ($pending_bookings as &$booking) {
                             <option value="">Choose vendor...</option>
                             <?php foreach ($vendors as $vendor): ?>
                                 <option value="<?= $vendor['id'] ?>">
-                                    <?= htmlspecialchars($vendor['vendor_name']) ?> - 
+                                    <?= htmlspecialchars($vendor['company_name']) ?> (<?= htmlspecialchars($vendor['vendor_code']) ?>) - 
                                     <?= htmlspecialchars($vendor['contact_person']) ?>
+                                    <?php if ($vendor['total_vehicles']): ?>
+                                        [<?= $vendor['total_vehicles'] ?> vehicles]
+                                    <?php endif; ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
@@ -742,6 +914,349 @@ foreach ($pending_bookings as &$booking) {
             </div>
         </div>
     </div>
+	<script>
+    // Modal functions
+    function openOwnedVehicleModal(bookingId, bookingRef) {
+        document.getElementById('owned_booking_id').value = bookingId;
+        document.getElementById('ownedVehicleModal').style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    }
+    
+    function openVendorVehicleModal(bookingId, bookingRef) {
+        document.getElementById('vendor_booking_id').value = bookingId;
+        document.getElementById('vendorVehicleModal').style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    }
+    
+    function openRejectModal(bookingId, bookingRef) {
+        document.getElementById('reject_booking_id').value = bookingId;
+        document.getElementById('rejectModal').style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    }
+    
+    function closeModal(modalId) {
+        document.getElementById(modalId).style.display = 'none';
+        document.body.style.overflow = 'auto';
+        
+        // Reset forms
+        const form = document.querySelector('#' + modalId + ' form');
+        if (form) {
+            form.reset();
+            // Clear calculated fields
+            if (modalId === 'vendorVehicleModal') {
+                document.getElementById('total_cost_display').value = '';
+            }
+        }
+    }
+    
+    // Calculate total cost for vendor vehicle
+    function calculateTotal() {
+        const rate = parseFloat(document.getElementById('rate_per_day').value) || 0;
+        const days = parseInt(document.getElementById('estimated_days').value) || 0;
+        const total = rate * days;
+        
+        document.getElementById('total_cost_display').value = total > 0 ? 
+            '₹' + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '';
+    }
+    
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+        const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
+        modals.forEach(modalId => {
+            const modal = document.getElementById(modalId);
+            if (event.target === modal) {
+                closeModal(modalId);
+            }
+        });
+    }
+    
+    // Auto-refresh page every 30 seconds to check for new requests
+    let autoRefreshInterval;
+    function startAutoRefresh() {
+        autoRefreshInterval = setInterval(function() {
+            // Only refresh if no modals are open
+            const modalsOpen = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal']
+                .some(id => document.getElementById(id).style.display === 'block');
+            
+            if (!modalsOpen) {
+                // Show subtle notification before refresh
+                showRefreshNotification();
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            }
+        }, 30000);
+    }
+    
+    function stopAutoRefresh() {
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+        }
+    }
+    
+    function showRefreshNotification() {
+        const notification = document.createElement('div');
+        notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in';
+        notification.innerHTML = '<i class="fas fa-sync-alt mr-2"></i>Checking for new requests...';
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 3000);
+    }
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        // Escape key to close modals
+        if (e.key === 'Escape') {
+            const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
+            modals.forEach(modalId => {
+                if (document.getElementById(modalId).style.display === 'block') {
+                    closeModal(modalId);
+                }
+            });
+        }
+        
+        // Ctrl+R to refresh (stop auto-refresh temporarily)
+        if (e.ctrlKey && e.key === 'r') {
+            stopAutoRefresh();
+            setTimeout(startAutoRefresh, 60000); // Restart after 1 minute
+        }
+    });
+    
+    // Form validation and enhancement
+    document.addEventListener('DOMContentLoaded', function() {
+        // Start auto-refresh
+        startAutoRefresh();
+        
+        // Validate phone numbers
+        const phoneInputs = document.querySelectorAll('input[type="tel"]');
+        phoneInputs.forEach(input => {
+            input.addEventListener('input', function() {
+                // Allow only numbers, +, -, and spaces
+                this.value = this.value.replace(/[^0-9+\-\s]/g, '');
+                
+                // Basic validation feedback
+                if (this.value.length >= 10) {
+                    this.classList.add('border-green-500');
+                    this.classList.remove('border-red-500');
+                } else if (this.value.length > 0) {
+                    this.classList.add('border-red-500');
+                    this.classList.remove('border-green-500');
+                } else {
+                    this.classList.remove('border-green-500', 'border-red-500');
+                }
+            });
+        });
+        
+        // Validate numeric inputs
+        const numericInputs = document.querySelectorAll('input[type="number"]');
+        numericInputs.forEach(input => {
+            input.addEventListener('input', function() {
+                if (this.value < 0) this.value = 0;
+                
+                // Add visual feedback for rate validation
+                if (this.name === 'rate_per_day' && this.value > 0) {
+                    this.classList.add('border-green-500');
+                    this.classList.remove('border-red-500');
+                } else if (this.name === 'rate_per_day' && this.value <= 0 && this.value !== '') {
+                    this.classList.add('border-red-500');
+                    this.classList.remove('border-green-500');
+                }
+            });
+        });
+        
+        // Enhanced form submission with loading states
+        const forms = document.querySelectorAll('form');
+        forms.forEach(form => {
+            form.addEventListener('submit', function(e) {
+                const submitBtn = this.querySelector('button[type="submit"]');
+                if (submitBtn) {
+                    const originalText = submitBtn.innerHTML;
+                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+                    submitBtn.disabled = true;
+                    
+                    // Re-enable button after 5 seconds as fallback
+                    setTimeout(() => {
+                        submitBtn.innerHTML = originalText;
+                        submitBtn.disabled = false;
+                    }, 5000);
+                }
+            });
+        });
+        
+        // Add confirmation for reject action
+        const rejectForm = document.querySelector('#rejectModal form');
+        if (rejectForm) {
+            rejectForm.addEventListener('submit', function(e) {
+                const reason = this.querySelector('textarea[name="rejection_reason"]').value.trim();
+                if (reason.length < 10) {
+                    e.preventDefault();
+                    alert('Please provide a more detailed rejection reason (at least 10 characters).');
+                    return false;
+                }
+                
+                if (!confirm('Are you sure you want to reject this booking? This action cannot be undone.')) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
+        }
+        
+        // Auto-save vendor form data in localStorage (in case of accidental refresh)
+        const vendorForm = document.querySelector('#vendorVehicleModal form');
+        if (vendorForm) {
+            const formInputs = vendorForm.querySelectorAll('input, select, textarea');
+            
+            formInputs.forEach(input => {
+                // Load saved data
+                const savedValue = localStorage.getItem(`vendor_form_${input.name}`);
+                if (savedValue && input.type !== 'hidden') {
+                    input.value = savedValue;
+                    if (input.name === 'rate_per_day' || input.name === 'estimated_days') {
+                        calculateTotal();
+                    }
+                }
+                
+                // Save data on change
+                input.addEventListener('change', function() {
+                    if (this.type !== 'hidden') {
+                        localStorage.setItem(`vendor_form_${this.name}`, this.value);
+                    }
+                });
+            });
+            
+            // Clear saved data on successful submission
+            vendorForm.addEventListener('submit', function() {
+                formInputs.forEach(input => {
+                    localStorage.removeItem(`vendor_form_${input.name}`);
+                });
+            });
+        }
+        
+        // Add tooltips for better UX
+        addTooltips();
+        
+        // Initialize drag and drop for file uploads (if needed in future)
+        initializeDragDrop();
+        
+        // Add keyboard navigation for modals
+        addModalKeyboardNavigation();
+    });
+    
+    // Add tooltips function
+    function addTooltips() {
+        const tooltipElements = [
+            { selector: 'input[name="rate_per_day"]', text: 'Enter the daily rate charged by the vendor' },
+            { selector: 'input[name="estimated_days"]', text: 'Estimate how many days the vehicle will be needed' },
+            { selector: 'textarea[name="vendor_notes"]', text: 'Include any special terms, conditions, or requirements' },
+            { selector: 'textarea[name="driver_notes"]', text: 'Special instructions for the driver (route, timings, etc.)' }
+        ];
+        
+        tooltipElements.forEach(item => {
+            const element = document.querySelector(item.selector);
+            if (element) {
+                element.title = item.text;
+                element.addEventListener('mouseenter', showTooltip);
+                element.addEventListener('mouseleave', hideTooltip);
+            }
+        });
+    }
+    
+    function showTooltip(e) {
+        // Custom tooltip implementation could go here
+    }
+    
+    function hideTooltip(e) {
+        // Hide custom tooltip
+    }
+    
+    // Initialize drag and drop (placeholder for future file upload features)
+    function initializeDragDrop() {
+        // Future implementation for document uploads
+    }
+    
+    // Add keyboard navigation for modals
+    function addModalKeyboardNavigation() {
+        const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
+        
+        modals.forEach(modalId => {
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.addEventListener('keydown', function(e) {
+                    // Tab navigation within modal
+                    if (e.key === 'Tab') {
+                        const focusableElements = this.querySelectorAll(
+                            'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])'
+                        );
+                        const firstElement = focusableElements[0];
+                        const lastElement = focusableElements[focusableElements.length - 1];
+                        
+                        if (e.shiftKey) {
+                            if (document.activeElement === firstElement) {
+                                e.preventDefault();
+                                lastElement.focus();
+                            }
+                        } else {
+                            if (document.activeElement === lastElement) {
+                                e.preventDefault();
+                                firstElement.focus();
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+    
+    // Utility function to format currency
+    function formatCurrency(amount) {
+        return new Intl.NumberFormat('en-IN', {
+            style: 'currency',
+            currency: 'INR',
+            minimumFractionDigits: 2
+        }).format(amount);
+    }
+    
+    // Utility function to show notifications
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        const bgColor = type === 'success' ? 'bg-green-500' : 
+                        type === 'error' ? 'bg-red-500' : 
+                        type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500';
+        
+        notification.className = `fixed top-4 right-4 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in`;
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 5000);
+    }
+    
+    // Handle connection status
+    function handleConnectionStatus() {
+        window.addEventListener('online', function() {
+            showNotification('<i class="fas fa-wifi mr-2"></i>Connection restored', 'success');
+            startAutoRefresh();
+        });
+        
+        window.addEventListener('offline', function() {
+            showNotification('<i class="fas fa-wifi-slash mr-2"></i>Connection lost - Working offline', 'warning');
+            stopAutoRefresh();
+        });
+    }
+    
+    // Initialize connection monitoring
+    handleConnectionStatus();
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        stopAutoRefresh();
+    });
+</script>
+</body>
+</html>
 
     <script>
         // Modal functions

@@ -1,0 +1,921 @@
+-- Fleet Management System - Complete Database Schema
+-- Version 2.0
+
+-- Drop existing tables if needed (be careful in production!)
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- 1. User Management Tables
+CREATE TABLE IF NOT EXISTS roles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    role_name VARCHAR(50) NOT NULL UNIQUE,
+    role_description TEXT,
+    priority INT DEFAULT 100,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS permissions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    permission_name VARCHAR(100) NOT NULL UNIQUE,
+    module VARCHAR(50) NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_module_action (module, action)
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+    role_id INT NOT NULL,
+    permission_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (role_id, permission_id),
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS branches (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    branch_code VARCHAR(20) NOT NULL UNIQUE,
+    branch_name VARCHAR(100) NOT NULL,
+    address TEXT,
+    city VARCHAR(50),
+    state VARCHAR(50),
+    pincode VARCHAR(10),
+    contact_person VARCHAR(100),
+    contact_phone VARCHAR(20),
+    contact_email VARCHAR(100),
+    gstin VARCHAR(15),
+    is_head_office BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_branch_code (branch_code),
+    INDEX idx_city_state (city, state)
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100) NOT NULL,
+    role_id INT NOT NULL,
+    branch_id INT,
+    department VARCHAR(50),
+    phone VARCHAR(20),
+    employee_code VARCHAR(20),
+    joining_date DATE,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_login DATETIME,
+    password_reset_token VARCHAR(100),
+    password_reset_expires DATETIME,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (role_id) REFERENCES roles(id),
+    FOREIGN KEY (branch_id) REFERENCES branches(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_username (username),
+    INDEX idx_email (email),
+    INDEX idx_employee_code (employee_code)
+);
+
+-- 2. Vehicle Management Tables
+CREATE TABLE IF NOT EXISTS vehicle_types (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(50) NOT NULL,
+    type_code VARCHAR(20) UNIQUE,
+    capacity_tons DECIMAL(10,2),
+    capacity_cubic_meters DECIMAL(10,2),
+    fuel_type ENUM('Diesel', 'Petrol', 'CNG', 'Electric', 'Hybrid') DEFAULT 'Diesel',
+    average_mileage DECIMAL(5,2),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS transporters (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    transporter_code VARCHAR(20) UNIQUE,
+    company_name VARCHAR(100) NOT NULL,
+    owner_name VARCHAR(100),
+    contact_person VARCHAR(100),
+    phone VARCHAR(20),
+    alternate_phone VARCHAR(20),
+    email VARCHAR(100),
+    address TEXT,
+    city VARCHAR(50),
+    state VARCHAR(50),
+    pincode VARCHAR(10),
+    gstin VARCHAR(15),
+    pan_number VARCHAR(10),
+    bank_name VARCHAR(100),
+    bank_account VARCHAR(20),
+    ifsc_code VARCHAR(11),
+    contract_start_date DATE,
+    contract_end_date DATE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_transporter_code (transporter_code),
+    INDEX idx_company_name (company_name)
+);
+
+CREATE TABLE IF NOT EXISTS vehicles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vehicle_number VARCHAR(20) NOT NULL UNIQUE,
+    vehicle_type_id INT,
+    transporter_id INT,
+    branch_id INT,
+    manufacturer VARCHAR(50),
+    model VARCHAR(50),
+    year_of_manufacture YEAR,
+    engine_number VARCHAR(50),
+    chassis_number VARCHAR(50),
+    color VARCHAR(30),
+    purchase_date DATE,
+    purchase_amount DECIMAL(12,2),
+    current_market_value DECIMAL(12,2),
+    insurance_company VARCHAR(100),
+    insurance_policy_number VARCHAR(50),
+    insurance_expiry DATE,
+    fitness_expiry DATE,
+    puc_expiry DATE,
+    permit_expiry DATE,
+    road_tax_expiry DATE,
+    current_odometer DECIMAL(10,2),
+    last_service_date DATE,
+    last_service_odometer DECIMAL(10,2),
+    next_service_due_date DATE,
+    next_service_due_odometer DECIMAL(10,2),
+    fuel_card_number VARCHAR(50),
+    fastag_number VARCHAR(50),
+    gps_device_id VARCHAR(50),
+    is_dedicated BOOLEAN DEFAULT TRUE,
+    ownership_type ENUM('Owned', 'Leased', 'Attached') DEFAULT 'Owned',
+    current_status ENUM('available', 'on_trip', 'maintenance', 'breakdown', 'inactive') DEFAULT 'available',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (vehicle_type_id) REFERENCES vehicle_types(id),
+    FOREIGN KEY (transporter_id) REFERENCES transporters(id),
+    FOREIGN KEY (branch_id) REFERENCES branches(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_vehicle_number (vehicle_number),
+    INDEX idx_current_status (current_status),
+    INDEX idx_branch_transporter (branch_id, transporter_id)
+);
+
+-- 3. Driver Management Tables
+CREATE TABLE IF NOT EXISTS drivers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    driver_code VARCHAR(20) UNIQUE,
+    full_name VARCHAR(100) NOT NULL,
+    father_name VARCHAR(100),
+    date_of_birth DATE,
+    gender ENUM('Male', 'Female', 'Other'),
+    phone VARCHAR(20) NOT NULL,
+    alternate_phone VARCHAR(20),
+    email VARCHAR(100),
+    current_address TEXT,
+    permanent_address TEXT,
+    city VARCHAR(50),
+    state VARCHAR(50),
+    pincode VARCHAR(10),
+    license_number VARCHAR(50) NOT NULL UNIQUE,
+    license_type VARCHAR(20),
+    license_issue_date DATE,
+    license_expiry_date DATE,
+    aadhar_number VARCHAR(12),
+    pan_number VARCHAR(10),
+    bank_name VARCHAR(100),
+    bank_account VARCHAR(20),
+    ifsc_code VARCHAR(11),
+    emergency_contact_name VARCHAR(100),
+    emergency_contact_phone VARCHAR(20),
+    emergency_contact_relation VARCHAR(50),
+    joining_date DATE,
+    experience_years INT,
+    previous_employer VARCHAR(100),
+    basic_salary DECIMAL(10,2),
+    allowances DECIMAL(10,2),
+    branch_id INT,
+    transporter_id INT,
+    current_vehicle_id INT,
+    blood_group VARCHAR(5),
+    medical_conditions TEXT,
+    status ENUM('active', 'inactive', 'on_leave', 'terminated') DEFAULT 'active',
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (branch_id) REFERENCES branches(id),
+    FOREIGN KEY (transporter_id) REFERENCES transporters(id),
+    FOREIGN KEY (current_vehicle_id) REFERENCES vehicles(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_driver_code (driver_code),
+    INDEX idx_license_number (license_number),
+    INDEX idx_phone (phone),
+    INDEX idx_status (status)
+);
+
+-- 4. Location Management Tables
+CREATE TABLE IF NOT EXISTS locations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    location_code VARCHAR(20) UNIQUE,
+    location_name VARCHAR(100) NOT NULL,
+    location_type ENUM('Plant', 'Warehouse', 'Depot', 'Customer', 'Vendor', 'Other'),
+    address TEXT,
+    city VARCHAR(50),
+    state VARCHAR(50),
+    pincode VARCHAR(10),
+    latitude DECIMAL(10, 8),
+    longitude DECIMAL(11, 8),
+    contact_person VARCHAR(100),
+    contact_phone VARCHAR(20),
+    contact_email VARCHAR(100),
+    loading_charges DECIMAL(10,2),
+    unloading_charges DECIMAL(10,2),
+    detention_charges_per_hour DECIMAL(10,2),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_location_code (location_code),
+    INDEX idx_location_type (location_type),
+    INDEX idx_city_state (city, state)
+);
+
+CREATE TABLE IF NOT EXISTS routes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    route_code VARCHAR(20) UNIQUE,
+    route_name VARCHAR(100),
+    origin_location_id INT NOT NULL,
+    destination_location_id INT NOT NULL,
+    distance_km DECIMAL(10,2),
+    estimated_duration_hours DECIMAL(5,2),
+    toll_charges DECIMAL(10,2),
+    route_description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (origin_location_id) REFERENCES locations(id),
+    FOREIGN KEY (destination_location_id) REFERENCES locations(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_route_code (route_code),
+    INDEX idx_origin_destination (origin_location_id, destination_location_id)
+);
+
+-- 5. Client Management Tables
+CREATE TABLE IF NOT EXISTS clients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    client_code VARCHAR(20) UNIQUE,
+    company_name VARCHAR(100) NOT NULL,
+    contact_person VARCHAR(100),
+    phone VARCHAR(20),
+    alternate_phone VARCHAR(20),
+    email VARCHAR(100),
+    address TEXT,
+    city VARCHAR(50),
+    state VARCHAR(50),
+    pincode VARCHAR(10),
+    gstin VARCHAR(15),
+    pan_number VARCHAR(10),
+    credit_limit DECIMAL(12,2),
+    credit_days INT,
+    billing_cycle ENUM('Daily', 'Weekly', 'Fortnightly', 'Monthly'),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_client_code (client_code),
+    INDEX idx_company_name (company_name)
+);
+
+-- 6. Trip Management Tables
+CREATE TABLE IF NOT EXISTS trip_types (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(50) NOT NULL,
+    type_code VARCHAR(20) UNIQUE,
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS trips (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    trip_number VARCHAR(20) NOT NULL UNIQUE,
+    vehicle_id INT NOT NULL,
+    driver_id INT NOT NULL,
+    trip_type_id INT,
+    branch_id INT,
+    client_id INT,
+    route_id INT,
+    origin_location_id INT,
+    destination_location_id INT,
+    scheduled_departure DATETIME,
+    actual_departure DATETIME,
+    scheduled_arrival DATETIME,
+    actual_arrival DATETIME,
+    loading_start_time DATETIME,
+    loading_end_time DATETIME,
+    unloading_start_time DATETIME,
+    unloading_end_time DATETIME,
+    start_odometer DECIMAL(10,2),
+    end_odometer DECIMAL(10,2),
+    distance_km DECIMAL(10,2),
+    freight_amount DECIMAL(12,2),
+    advance_amount DECIMAL(10,2),
+    detention_hours DECIMAL(5,2),
+    detention_charges DECIMAL(10,2),
+    loading_charges DECIMAL(10,2),
+    unloading_charges DECIMAL(10,2),
+    toll_charges DECIMAL(10,2),
+    other_charges DECIMAL(10,2),
+    total_charges DECIMAL(12,2),
+    consignment_note_number VARCHAR(50),
+    lr_number VARCHAR(50),
+    invoice_number VARCHAR(50),
+    eway_bill_number VARCHAR(50),
+    pod_received BOOLEAN DEFAULT FALSE,
+    pod_received_date DATE,
+    status ENUM('scheduled', 'confirmed', 'loading', 'in_transit', 'unloading', 'completed', 'cancelled') DEFAULT 'scheduled',
+    cancellation_reason TEXT,
+    remarks TEXT,
+    created_by INT,
+    approved_by INT,
+    approved_at DATETIME,
+    completed_by INT,
+    completed_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
+    FOREIGN KEY (driver_id) REFERENCES drivers(id),
+    FOREIGN KEY (trip_type_id) REFERENCES trip_types(id),
+    FOREIGN KEY (branch_id) REFERENCES branches(id),
+    FOREIGN KEY (client_id) REFERENCES clients(id),
+    FOREIGN KEY (route_id) REFERENCES routes(id),
+    FOREIGN KEY (origin_location_id) REFERENCES locations(id),
+    FOREIGN KEY (destination_location_id) REFERENCES locations(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (approved_by) REFERENCES users(id),
+    FOREIGN KEY (completed_by) REFERENCES users(id),
+    INDEX idx_trip_number (trip_number),
+    INDEX idx_status (status),
+    INDEX idx_vehicle_driver (vehicle_id, driver_id),
+    INDEX idx_dates (scheduled_departure, scheduled_arrival),
+    INDEX idx_client (client_id)
+);
+
+-- 7. Expense Management Tables
+CREATE TABLE IF NOT EXISTS expense_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category_name VARCHAR(50) NOT NULL,
+    category_code VARCHAR(20) UNIQUE,
+    parent_category_id INT,
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parent_category_id) REFERENCES expense_categories(id)
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    expense_number VARCHAR(20) UNIQUE,
+    vehicle_id INT,
+    driver_id INT,
+    trip_id INT,
+    expense_category_id INT NOT NULL,
+    expense_date DATETIME NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    payment_mode ENUM('Cash', 'Bank Transfer', 'Credit Card', 'Debit Card', 'UPI', 'Cheque'),
+    vendor_name VARCHAR(100),
+    bill_number VARCHAR(50),
+    description TEXT,
+    odometer_reading DECIMAL(10,2),
+    fuel_quantity DECIMAL(10,2),
+    fuel_rate DECIMAL(10,2),
+    approval_status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    approved_by INT,
+    approved_at DATETIME,
+    rejection_reason TEXT,
+    receipt_path VARCHAR(255),
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
+    FOREIGN KEY (driver_id) REFERENCES drivers(id),
+    FOREIGN KEY (trip_id) REFERENCES trips(id),
+    FOREIGN KEY (expense_category_id) REFERENCES expense_categories(id),
+    FOREIGN KEY (approved_by) REFERENCES users(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_expense_number (expense_number),
+    INDEX idx_expense_date (expense_date),
+    INDEX idx_vehicle_trip (vehicle_id, trip_id),
+    INDEX idx_approval_status (approval_status)
+);
+
+-- 8. Maintenance Management Tables
+CREATE TABLE IF NOT EXISTS maintenance_types (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(50) NOT NULL,
+    type_code VARCHAR(20) UNIQUE,
+    description TEXT,
+    is_scheduled BOOLEAN DEFAULT FALSE,
+    frequency_days INT,
+    frequency_km DECIMAL(10,2),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_records (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    maintenance_number VARCHAR(20) UNIQUE,
+    vehicle_id INT NOT NULL,
+    maintenance_type_id INT NOT NULL,
+    scheduled_date DATE,
+    actual_date DATE,
+    odometer_reading DECIMAL(10,2),
+    vendor_name VARCHAR(100),
+    vendor_contact VARCHAR(20),
+    work_description TEXT,
+    parts_replaced TEXT,
+    total_cost DECIMAL(10,2),
+    labour_cost DECIMAL(10,2),
+    parts_cost DECIMAL(10,2),
+    next_service_date DATE,
+    next_service_odometer DECIMAL(10,2),
+    downtime_hours DECIMAL(5,2),
+    status ENUM('scheduled', 'in_progress', 'completed', 'cancelled') DEFAULT 'scheduled',
+    created_by INT,
+    completed_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id),
+    FOREIGN KEY (maintenance_type_id) REFERENCES maintenance_types(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (completed_by) REFERENCES users(id),
+    INDEX idx_maintenance_number (maintenance_number),
+    INDEX idx_vehicle_date (vehicle_id, actual_date),
+    INDEX idx_status (status)
+);
+
+-- 9. Document Management Tables
+CREATE TABLE IF NOT EXISTS document_types (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(50) NOT NULL,
+    type_code VARCHAR(20) UNIQUE,
+    entity_type ENUM('Vehicle', 'Driver', 'Trip', 'Expense'),
+    is_mandatory BOOLEAN DEFAULT FALSE,
+    validity_days INT,
+    alert_before_days INT DEFAULT 30,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    document_type_id INT NOT NULL,
+    entity_type ENUM('Vehicle', 'Driver', 'Trip', 'Expense'),
+    entity_id INT NOT NULL,
+    document_number VARCHAR(50),
+    issue_date DATE,
+    expiry_date DATE,
+    file_path VARCHAR(255),
+    file_size INT,
+    file_type VARCHAR(50),
+    is_verified BOOLEAN DEFAULT FALSE,
+    verified_by INT,
+    verified_at DATETIME,
+    remarks TEXT,
+    uploaded_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (document_type_id) REFERENCES document_types(id),
+    FOREIGN KEY (verified_by) REFERENCES users(id),
+    FOREIGN KEY (uploaded_by) REFERENCES users(id),
+    INDEX idx_entity (entity_type, entity_id),
+    INDEX idx_expiry_date (expiry_date),
+    INDEX idx_document_number (document_number)
+);
+
+-- 10. Billing & Invoice Tables
+CREATE TABLE IF NOT EXISTS invoice_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    branch_id INT,
+    invoice_prefix VARCHAR(10),
+    invoice_suffix VARCHAR(10),
+    next_invoice_number INT DEFAULT 1,
+    gst_number VARCHAR(15),
+    pan_number VARCHAR(10),
+    terms_conditions TEXT,
+    bank_details TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (branch_id) REFERENCES branches(id)
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    invoice_number VARCHAR(30) NOT NULL UNIQUE,
+    invoice_date DATE NOT NULL,
+    client_id INT NOT NULL,
+    branch_id INT,
+    billing_period_start DATE,
+    billing_period_end DATE,
+    subtotal DECIMAL(12,2) NOT NULL,
+    cgst_rate DECIMAL(5,2),
+    cgst_amount DECIMAL(10,2),
+    sgst_rate DECIMAL(5,2),
+    sgst_amount DECIMAL(10,2),
+    igst_rate DECIMAL(5,2),
+    igst_amount DECIMAL(10,2),
+    other_charges DECIMAL(10,2),
+    discount_amount DECIMAL(10,2),
+    total_amount DECIMAL(12,2) NOT NULL,
+    amount_in_words VARCHAR(255),
+    payment_terms VARCHAR(50),
+    due_date DATE,
+    status ENUM('draft', 'sent', 'partially_paid', 'paid', 'cancelled') DEFAULT 'draft',
+    notes TEXT,
+    created_by INT,
+    approved_by INT,
+    approved_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id),
+    FOREIGN KEY (branch_id) REFERENCES branches(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (approved_by) REFERENCES users(id),
+    INDEX idx_invoice_number (invoice_number),
+    INDEX idx_invoice_date (invoice_date),
+    INDEX idx_client (client_id),
+    INDEX idx_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS invoice_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT NOT NULL,
+    trip_id INT,
+    description VARCHAR(255),
+    quantity DECIMAL(10,2),
+    rate DECIMAL(10,2),
+    amount DECIMAL(12,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+    FOREIGN KEY (trip_id) REFERENCES trips(id),
+    INDEX idx_invoice (invoice_id)
+);
+
+-- 11. Payment Management Tables
+CREATE TABLE IF NOT EXISTS payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    payment_number VARCHAR(20) UNIQUE,
+    payment_date DATE NOT NULL,
+    payment_type ENUM('Received', 'Made') NOT NULL,
+    entity_type ENUM('Invoice', 'Expense', 'Driver Salary', 'Vendor Payment'),
+    entity_id INT,
+    payer_payee_name VARCHAR(100),
+    amount DECIMAL(12,2) NOT NULL,
+    payment_mode ENUM('Cash', 'Bank Transfer', 'Cheque', 'UPI', 'Credit Card', 'Debit Card'),
+    bank_name VARCHAR(100),
+    transaction_reference VARCHAR(50),
+    cheque_number VARCHAR(20),
+    cheque_date DATE,
+    remarks TEXT,
+    receipt_number VARCHAR(50),
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_payment_number (payment_number),
+    INDEX idx_payment_date (payment_date),
+    INDEX idx_entity (entity_type, entity_id)
+);
+
+-- 12. Notification & Alert Tables
+CREATE TABLE IF NOT EXISTS notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    notification_type VARCHAR(50),
+    title VARCHAR(255),
+    message TEXT,
+    entity_type VARCHAR(50),
+    entity_id INT,
+    priority ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+    is_read BOOLEAN DEFAULT FALSE,
+    read_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    INDEX idx_user_unread (user_id, is_read),
+    INDEX idx_created_at (created_at)
+);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    alert_type VARCHAR(50),
+    entity_type VARCHAR(50),
+    entity_id INT,
+    title VARCHAR(255),
+    description TEXT,
+    alert_date DATE,
+    days_before INT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_alert_date (alert_date),
+    INDEX idx_entity (entity_type, entity_id)
+);
+
+-- 13. Audit & Activity Log Tables
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT,
+    action VARCHAR(100),
+    module VARCHAR(50),
+    entity_type VARCHAR(50),
+    entity_id INT,
+    old_values JSON,
+    new_values JSON,
+    details TEXT,
+    ip_address VARCHAR(45),
+    user_agent VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    INDEX idx_user (user_id),
+    INDEX idx_module (module),
+    INDEX idx_entity (entity_type, entity_id),
+    INDEX idx_created_at (created_at)
+);
+
+-- 14. Rate Management Tables
+CREATE TABLE IF NOT EXISTS rate_contracts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    contract_number VARCHAR(20) UNIQUE,
+    client_id INT NOT NULL,
+    transporter_id INT,
+    contract_type ENUM('Client Rate', 'Transporter Rate'),
+    valid_from DATE NOT NULL,
+    valid_to DATE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    approved_by INT,
+    approved_at DATETIME,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id),
+    FOREIGN KEY (transporter_id) REFERENCES transporters(id),
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (approved_by) REFERENCES users(id),
+    INDEX idx_contract_number (contract_number),
+    INDEX idx_validity (valid_from, valid_to)
+);
+
+CREATE TABLE IF NOT EXISTS rate_contract_details (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    rate_contract_id INT NOT NULL,
+    route_id INT,
+    vehicle_type_id INT,
+    rate_per_km DECIMAL(10,2),
+    rate_per_ton DECIMAL(10,2),
+    rate_per_trip DECIMAL(10,2),
+    loading_charges DECIMAL(10,2),
+    unloading_charges DECIMAL(10,2),
+    detention_charges_per_hour DECIMAL(10,2),
+    min_guaranteed_weight DECIMAL(10,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (rate_contract_id) REFERENCES rate_contracts(id) ON DELETE CASCADE,
+    FOREIGN KEY (route_id) REFERENCES routes(id),
+    FOREIGN KEY (vehicle_type_id) REFERENCES vehicle_types(id),
+    INDEX idx_contract_route (rate_contract_id, route_id)
+);
+
+-- 15. Reports Configuration Tables
+CREATE TABLE IF NOT EXISTS report_templates (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    template_name VARCHAR(100) NOT NULL,
+    template_code VARCHAR(50) UNIQUE,
+    report_type VARCHAR(50),
+    module VARCHAR(50),
+    template_content JSON,
+    is_system_report BOOLEAN DEFAULT FALSE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_reports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    report_template_id INT NOT NULL,
+    report_name VARCHAR(100),
+    frequency ENUM('Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'),
+    schedule_day INT,
+    schedule_time TIME,
+    recipients JSON,
+    last_run_at DATETIME,
+    next_run_at DATETIME,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (report_template_id) REFERENCES report_templates(id),
+    FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+-- Insert default data for roles
+INSERT INTO roles (role_name, role_description, priority) VALUES
+('Admin', 'System Administrator', 1),
+('Director', 'Company Director', 2),
+('Senior Manager', 'Senior Management', 3),
+('Manager', 'Department Manager', 4),
+('Supervisor', 'Operations Supervisor', 5),
+('Accountant', 'Accounts Department', 6),
+('Staff', 'General Staff', 7);
+
+-- Insert default permissions
+INSERT INTO permissions (permission_name, module, action, description) VALUES
+-- User Management
+('View Users', 'users', 'view', 'Can view user list'),
+('Create Users', 'users', 'create', 'Can create new users'),
+('Edit Users', 'users', 'edit', 'Can edit user details'),
+('Delete Users', 'users', 'delete', 'Can delete users'),
+-- Vehicle Management
+('View Vehicles', 'vehicles', 'view', 'Can view vehicle list'),
+('Create Vehicles', 'vehicles', 'create', 'Can add new vehicles'),
+('Edit Vehicles', 'vehicles', 'edit', 'Can edit vehicle details'),
+('Delete Vehicles', 'vehicles', 'delete', 'Can delete vehicles'),
+-- Driver Management
+('View Drivers', 'drivers', 'view', 'Can view driver list'),
+('Create Drivers', 'drivers', 'create', 'Can add new drivers'),
+('Edit Drivers', 'drivers', 'edit', 'Can edit driver details'),
+('Delete Drivers', 'drivers', 'delete', 'Can delete drivers'),
+-- Trip Management
+('View Trips', 'trips', 'view', 'Can view trip list'),
+('Create Trips', 'trips', 'create', 'Can create new trips'),
+('Edit Trips', 'trips', 'edit', 'Can edit trip details'),
+('Approve Trips', 'trips', 'approve', 'Can approve trips'),
+('Cancel Trips', 'trips', 'cancel', 'Can cancel trips'),
+-- Expense Management
+('View Expenses', 'expenses', 'view', 'Can view expenses'),
+('Create Expenses', 'expenses', 'create', 'Can add expenses'),
+('Approve Expenses', 'expenses', 'approve', 'Can approve expenses'),
+-- Billing
+('View Invoices', 'billing', 'view', 'Can view invoices'),
+('Create Invoices', 'billing', 'create', 'Can create invoices'),
+('Approve Invoices', 'billing', 'approve', 'Can approve invoices'),
+-- Reports
+('View Reports', 'reports', 'view', 'Can view reports'),
+('Export Reports', 'reports', 'export', 'Can export reports'),
+('View Financial Reports', 'reports', 'financial', 'Can view financial reports');
+
+-- Assign all permissions to Admin role
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT 1, id FROM permissions;
+
+-- Insert default vehicle types
+INSERT INTO vehicle_types (type_name, type_code, capacity_tons, fuel_type, average_mileage) VALUES
+('32 Feet Multi Axle', 'MA32', 15.00, 'Diesel', 4.5),
+('22 Feet Single Axle', 'SA22', 10.00, 'Diesel', 5.5),
+('19 Feet Single Axle', 'SA19', 7.50, 'Diesel', 6.0),
+('Tata Ace', 'TACE', 1.00, 'Diesel', 15.0),
+('Pickup 8 Feet', 'PK8', 1.50, 'Diesel', 12.0);
+
+-- Insert default expense categories
+INSERT INTO expense_categories (category_name, category_code) VALUES
+('Fuel', 'FUEL'),
+('Maintenance', 'MAINT'),
+('Toll', 'TOLL'),
+('Driver Expenses', 'DRVEXP'),
+('Loading/Unloading', 'LOADUNLOAD'),
+('Miscellaneous', 'MISC');
+
+-- Insert fuel sub-categories
+INSERT INTO expense_categories (category_name, category_code, parent_category_id) 
+SELECT 'Diesel', 'DIESEL', id FROM expense_categories WHERE category_code = 'FUEL';
+INSERT INTO expense_categories (category_name, category_code, parent_category_id) 
+SELECT 'Petrol', 'PETROL', id FROM expense_categories WHERE category_code = 'FUEL';
+
+-- Insert maintenance sub-categories
+INSERT INTO expense_categories (category_name, category_code, parent_category_id) 
+SELECT 'Servicing', 'SERVICE', id FROM expense_categories WHERE category_code = 'MAINT';
+INSERT INTO expense_categories (category_name, category_code, parent_category_id) 
+SELECT 'Tyre', 'TYRE', id FROM expense_categories WHERE category_code = 'MAINT';
+INSERT INTO expense_categories (category_name, category_code, parent_category_id) 
+SELECT 'Battery', 'BATTERY', id FROM expense_categories WHERE category_code = 'MAINT';
+INSERT INTO expense_categories (category_name, category_code, parent_category_id) 
+SELECT 'Repair', 'REPAIR', id FROM expense_categories WHERE category_code = 'MAINT';
+
+-- Insert default document types
+INSERT INTO document_types (type_name, type_code, entity_type, is_mandatory, validity_days, alert_before_days) VALUES
+-- Vehicle Documents
+('Registration Certificate', 'RC', 'Vehicle', TRUE, 5475, 60),
+('Insurance', 'INSURANCE', 'Vehicle', TRUE, 365, 30),
+('Fitness Certificate', 'FITNESS', 'Vehicle', TRUE, 365, 30),
+('PUC Certificate', 'PUC', 'Vehicle', TRUE, 180, 15),
+('Permit', 'PERMIT', 'Vehicle', TRUE, 365, 30),
+('Road Tax Receipt', 'ROADTAX', 'Vehicle', TRUE, 365, 30),
+-- Driver Documents
+('Driving License', 'DL', 'Driver', TRUE, 1825, 60),
+('Aadhar Card', 'AADHAR', 'Driver', TRUE, NULL, NULL),
+('PAN Card', 'PAN', 'Driver', FALSE, NULL, NULL),
+('Police Verification', 'POLICE', 'Driver', FALSE, 365, 30);
+
+-- Insert default maintenance types
+INSERT INTO maintenance_types (type_name, type_code, is_scheduled, frequency_days, frequency_km) VALUES
+('Regular Service', 'SERVICE', TRUE, 90, 10000),
+('Oil Change', 'OIL', TRUE, 60, 5000),
+('Tyre Rotation', 'TYRE_ROT', TRUE, 120, 15000),
+('Brake Inspection', 'BRAKE', TRUE, 180, 20000),
+('Battery Check', 'BATTERY', TRUE, 90, NULL),
+('Breakdown Repair', 'BREAKDOWN', FALSE, NULL, NULL),
+('Accident Repair', 'ACCIDENT', FALSE, NULL, NULL);
+
+-- Insert default trip types
+INSERT INTO trip_types (type_name, type_code, description) VALUES
+('Regular', 'REGULAR', 'Regular scheduled trip'),
+('Express', 'EXPRESS', 'Express delivery trip'),
+('Return', 'RETURN', 'Return trip'),
+('Empty', 'EMPTY', 'Empty vehicle movement'),
+('Special', 'SPECIAL', 'Special assignment');
+
+-- Create indexes for better performance
+CREATE INDEX idx_trips_dates ON trips (scheduled_departure, scheduled_arrival);
+CREATE INDEX idx_vehicles_status ON vehicles (current_status, is_active);
+CREATE INDEX idx_drivers_status ON drivers (status);
+CREATE INDEX idx_expenses_dates ON expenses (expense_date);
+CREATE INDEX idx_invoices_dates ON invoices (invoice_date, due_date);
+
+-- Create views for common queries
+CREATE OR REPLACE VIEW vehicle_current_status AS
+SELECT 
+    v.id,
+    v.vehicle_number,
+    v.current_status,
+    vt.type_name,
+    b.branch_name,
+    d.full_name as driver_name,
+    t.trip_number as current_trip,
+    t.destination_location_id
+FROM vehicles v
+LEFT JOIN vehicle_types vt ON v.vehicle_type_id = vt.id
+LEFT JOIN branches b ON v.branch_id = b.id
+LEFT JOIN drivers d ON v.id = d.current_vehicle_id AND d.status = 'active'
+LEFT JOIN trips t ON v.id = t.vehicle_id AND t.status IN ('loading', 'in_transit', 'unloading');
+
+CREATE OR REPLACE VIEW upcoming_document_expiry AS
+SELECT 
+    'Vehicle' as entity_type,
+    v.vehicle_number as entity_name,
+    dt.type_name as document_type,
+    d.expiry_date,
+    DATEDIFF(d.expiry_date, CURDATE()) as days_remaining
+FROM documents d
+JOIN document_types dt ON d.document_type_id = dt.id
+JOIN vehicles v ON d.entity_id = v.id AND d.entity_type = 'Vehicle'
+WHERE d.expiry_date IS NOT NULL 
+    AND DATEDIFF(d.expiry_date, CURDATE()) <= dt.alert_before_days
+    AND DATEDIFF(d.expiry_date, CURDATE()) > 0
+UNION ALL
+SELECT 
+    'Driver' as entity_type,
+    dr.full_name as entity_name,
+    dt.type_name as document_type,
+    d.expiry_date,
+    DATEDIFF(d.expiry_date, CURDATE()) as days_remaining
+FROM documents d
+JOIN document_types dt ON d.document_type_id = dt.id
+JOIN drivers dr ON d.entity_id = dr.id AND d.entity_type = 'Driver'
+WHERE d.expiry_date IS NOT NULL 
+    AND DATEDIFF(d.expiry_date, CURDATE()) <= dt.alert_before_days
+    AND DATEDIFF(d.expiry_date, CURDATE()) > 0
+ORDER BY days_remaining ASC;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- Grant appropriate permissions (adjust as needed)
+-- GRANT ALL PRIVILEGES ON fleet_management_new.* TO 'fleet_user'@'localhost' IDENTIFIED BY 'your_password';
+-- FLUSH PRIVILEGES;
+
+So now we will move to a new module on the dashboard.
+Client Section - 
+Add new client
+Manage clients
+Client Reports
+
+In the add new client page we will create new clients with fields - 
+General Info-
+Client Name
+Contact Person Name
+Phone number
+Email
+Address
+Billing Info-
+Billing Cycle (In days)
+PAN Card Info

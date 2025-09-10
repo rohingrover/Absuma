@@ -1,0 +1,247 @@
+ALTER TABLE VEHICLES ADD COLUMN last_modified_by VARCHAR(50) DEFAULT NULL;
+
+
+ALTER TABLE VEHICLES ADD COLUMN last_approved_by INT(11) DEFAULT NULL;
+
+CREATE TABLE IF NOT EXISTS vehicle_change_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vehicle_id INT NOT NULL,
+    requested_by INT NOT NULL,
+    request_type ENUM('create', 'update', 'delete', 'status_change') NOT NULL,
+    current_data JSON NULL,
+    proposed_data JSON NOT NULL,
+    reason TEXT NULL,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    approved_by INT NULL,
+    approved_at TIMESTAMP NULL,
+    rejection_reason TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_vehicle_id (vehicle_id),
+    INDEX idx_requested_by (requested_by),
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at),
+    
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+
+ALTER TABLE vehicle_change_requests 
+MODIFY COLUMN vehicle_id INT NULL;
+
+
+-- Create notifications table
+CREATE TABLE notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type ENUM('info', 'success', 'warning', 'error') DEFAULT 'info',
+    related_table VARCHAR(100) NULL,
+    related_id INT NULL,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    read_at TIMESTAMP NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_is_read (is_read),
+    INDEX idx_created_at (created_at)
+);
+
+-- Optional: Create a view for unread notifications count per user
+CREATE VIEW unread_notifications_count AS
+SELECT 
+    user_id,
+    COUNT(*) as unread_count
+	CREATE TABLE vendor_bank_change_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vendor_id INT NOT NULL,
+    requested_by INT NOT NULL,
+    bank_name VARCHAR(255) NOT NULL,
+    account_number VARCHAR(50) NOT NULL,
+    branch_name VARCHAR(255) NOT NULL,
+    ifsc_code VARCHAR(11) NOT NULL,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    approved_by INT NULL,
+    approved_at TIMESTAMP NULL,
+    rejection_reason TEXT NULL,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE vendor_deletion_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vendor_id INT NOT NULL,
+    requested_by INT NOT NULL,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reason TEXT,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    approved_by INT NULL,
+    approved_at TIMESTAMP NULL,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+);
+FROM notifications 
+WHERE is_read = FALSE 
+GROUP BY user_id;
+
+ALTER TABLE vehicle_change_requests 
+MODIFY COLUMN vehicle_id INT NULL;
+
+CREATE TABLE vendor_bank_change_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vendor_id INT NOT NULL,
+    requested_by INT NOT NULL,
+    bank_name VARCHAR(255) NOT NULL,
+    account_number VARCHAR(50) NOT NULL,
+    branch_name VARCHAR(255) NOT NULL,
+    ifsc_code VARCHAR(11) NOT NULL,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
+    approved_by INT NULL,
+    approved_at TIMESTAMP NULL,
+    rejection_reason TEXT NULL,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+
+CREATE TABLE vendor_approval_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vendor_id INT NOT NULL,
+    action ENUM(
+        'submitted', 
+        'approved', 
+        'rejected', 
+        'resubmitted',
+        'bank_details_approved',
+        'bank_details_rejected', 
+        'deleted',
+        'deletion_rejected',
+        'suspended',
+        'reactivated'
+    ) NOT NULL,
+    action_by INT NOT NULL,
+    action_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    comments TEXT,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    previous_status VARCHAR(50),
+    new_status VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Foreign Keys
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
+    FOREIGN KEY (action_by) REFERENCES users(id) ON DELETE CASCADE,
+    
+    -- Indexes for performance
+    INDEX idx_vendor_approval_logs_vendor_id (vendor_id),
+    INDEX idx_vendor_approval_logs_action_by (action_by),
+    INDEX idx_vendor_approval_logs_action_at (action_at),
+    INDEX idx_vendor_approval_logs_action (action)
+);
+
+-- Create a view for vendor approval summary for easy reporting
+CREATE OR REPLACE VIEW vendor_approval_summary AS
+SELECT 
+    DATE(val.action_at) as log_date,
+    val.action,
+    COUNT(*) as action_count,
+    COUNT(DISTINCT val.vendor_id) as unique_vendors,
+    COUNT(DISTINCT val.action_by) as unique_approvers
+FROM vendor_approval_logs val
+GROUP BY DATE(val.action_at), val.action
+ORDER BY log_date DESC, val.action;
+
+-- Create a stored procedure to get vendor approval statistics
+DELIMITER //
+
+CREATE PROCEDURE GetVendorApprovalStatistics(
+    IN start_date DATE,
+    IN end_date DATE
+)
+BEGIN
+    SELECT 
+        'Total Actions' as metric,
+        COUNT(*) as count
+    FROM vendor_approval_logs 
+    WHERE action_at BETWEEN start_date AND end_date
+    
+    UNION ALL
+    
+    SELECT 
+        CONCAT('Action: ', action) as metric,
+        COUNT(*) as count
+    FROM vendor_approval_logs 
+    WHERE action_at BETWEEN start_date AND end_date
+    GROUP BY action
+    
+    UNION ALL
+    
+    SELECT 
+        'Unique Vendors Processed' as metric,
+        COUNT(DISTINCT vendor_id) as count
+    FROM vendor_approval_logs 
+    WHERE action_at BETWEEN start_date AND end_date
+    
+    UNION ALL
+    
+    SELECT 
+        'Unique Approvers' as metric,
+        COUNT(DISTINCT action_by) as count
+    FROM vendor_approval_logs 
+    WHERE action_at BETWEEN start_date AND end_date;
+END //
+
+DELIMITER ;
+
+-- Create trigger to automatically log vendor status changes
+DELIMITER //
+
+CREATE TRIGGER vendor_status_change_log 
+AFTER UPDATE ON vendors
+FOR EACH ROW
+BEGIN
+    -- Only log if approval_status actually changed
+    IF OLD.approval_status != NEW.approval_status THEN
+        INSERT INTO vendor_approval_logs (
+            vendor_id, 
+            action, 
+            action_by, 
+            action_at, 
+            comments,
+            previous_status,
+            new_status,
+            ip_address
+        ) VALUES (
+            NEW.id,
+            CASE 
+                WHEN NEW.approval_status = 'approved' AND OLD.approval_status != 'approved' THEN 'approved'
+                WHEN NEW.approval_status = 'rejected' AND OLD.approval_status != 'rejected' THEN 'rejected'
+                WHEN NEW.approval_status = 'pending' AND OLD.approval_status != 'pending' THEN 'resubmitted'
+                WHEN NEW.approval_status = 'suspended' AND OLD.approval_status != 'suspended' THEN 'suspended'
+                ELSE 'status_updated'
+            END,
+            COALESCE(NEW.approved_by, @current_user_id, 1),
+            NOW(),
+            CONCAT('Status changed from ', OLD.approval_status, ' to ', NEW.approval_status),
+            OLD.approval_status,
+            NEW.approval_status,
+            'auto-trigger'
+        );
+    END IF;
+END //
+
+DELIMITER ;
+
+
+
+Future scope - 
+1) Data development
