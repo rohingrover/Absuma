@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $insurance_number = trim($_POST['insurance_number']);
         $insurance_expiry = $_POST['insurance_expiry'];
         $puc_number = trim($_POST['puc_number']);
-        $puc_expiry = $_POST['puc_expiry']);
+        $puc_expiry = $_POST['puc_expiry'];
         $fitness_expiry = $_POST['fitness_expiry'];
         $permit_expiry = $_POST['permit_expiry'];
         $rc_number = trim($_POST['rc_number']);
