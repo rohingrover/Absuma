@@ -1,13 +1,13 @@
-
 <?php
 session_start();
 require 'auth_check.php';
 require 'db_connection.php';
 
-// Check if user has L2 supervisor access
+// Check if user has L2 supervisor or superadmin access
 $user_role = $_SESSION['role'];
-if ($user_role !== 'l2_supervisor') {
-    $_SESSION['error'] = "Access denied. This page is only for L2 supervisors.";
+$allowed_roles = ['l2_supervisor', 'superadmin'];
+if (!in_array($user_role, $allowed_roles)) {
+    $_SESSION['error'] = "Access denied. This page is only for L2 supervisors and superadmins.";
     header("Location: dashboard.php");
     exit();
 }
@@ -508,7 +508,7 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="bg-teal-50 px-4 py-2 rounded-lg">
-                            <span class="text-sm font-medium text-teal-800">L2 Supervisor Dashboard</span>
+                            <span class="text-sm font-medium text-teal-800"><?= ucfirst(str_replace('_', ' ', $user_role)) ?> Dashboard</span>
                         </div>
                     </div>
                 </div>
