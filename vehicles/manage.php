@@ -114,7 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && canApprov
         $_SESSION['error'] = "Error processing request: " . $e->getMessage();
     }
     
-    header("Location: manage_vehicles.php");
+    header("Location: manage.php");
     exit();
 }
 
@@ -162,7 +162,7 @@ if (isset($_GET['delete']) && canApprove($user_role)) {
         $pdo->rollBack();
         $_SESSION['error'] = "Delete failed: " . $e->getMessage();
     }
-    header("Location: manage_vehicles.php");
+    header("Location: manage.php");
     exit();
 }
 
@@ -413,7 +413,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_action'])) {
             $error = "Error updating vehicle: " . $e->getMessage();
         }
         
-        header("Location: manage_vehicles.php");
+        header("Location: manage.php");
         exit();
     }
 }
@@ -1457,7 +1457,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_action'])) {
             // Documents Management
             async viewDocuments(vehicleId) {
                 try {
-                    const response = await fetch(`manage_vehicles.php?view_docs=${vehicleId}`);
+                    const response = await fetch(`manage.php?view_docs=${vehicleId}`);
                     const documents = await response.json();
 
                     if (documents && documents.length > 0) {
@@ -1549,7 +1549,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_action'])) {
                     this.showAlert('Deleting vehicle...', 'info');
                     
                     // Redirect to delete
-                    window.location.href = `manage_vehicles.php?delete=${vehicleId}`;
+                    window.location.href = `manage.php?delete=${vehicleId}`;
                 }
             }
 

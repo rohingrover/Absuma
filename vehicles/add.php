@@ -489,7 +489,7 @@ if (isset($_SESSION['error'])) {
                     </div>
                     
                     <div class="p-6">
-                        <form id="vehicleForm" method="POST" action="add_vehicle.php" class="form-grid">
+                        <form id="vehicleForm" method="POST" action="add.php" class="form-grid">
                             <!-- Vehicle Number -->
                             <div class="form-field">
                                 <label for="vehicle_number" class="block text-sm font-medium text-gray-700">Vehicle Number <span class="text-red-500">*</span></label>
@@ -648,7 +648,7 @@ if (isset($_SESSION['error'])) {
                                     </button>
                                 </div>
                                 <div class="flex items-center space-x-3">
-                                    <a href="manage_vehicles.php" class="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors">
+                                    <a href="manage.php" class="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors">
                                         <i class="fas fa-list mr-2"></i>View All Vehicles
                                     </a>
                                     <a href="dashboard.php" class="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-colors">
