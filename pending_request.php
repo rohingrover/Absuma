@@ -1,4 +1,3 @@
-
 <?php
 session_start();
 require 'auth_check.php';
@@ -14,310 +13,1232 @@ if ($user_role !== 'l2_supervisor') {
 
 $success_message = '';
 $error_message = '';
+// Generate CSRF token if not set
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 
-// Handle form submissions
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+// Handle form submission with CSRF validation
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_container_details') {
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid CSRF token']);
+        exit;
+    }
+
+    // Check if this submission has already been processed
+    $booking_id = $_POST['booking_id'];
+    $submission_hash = md5(json_encode($_POST['containers']) . $_SESSION['csrf_token']);
+    if (isset($_SESSION['processed_submissions'][$booking_id]) && in_array($submission_hash, $_SESSION['processed_submissions'][$booking_id])) {
+        echo json_encode(['success' => true, 'message' => 'Submission already processed']);
+        exit;
+    }
+
+    handleContainerImageUpload($pdo, $_POST, $_FILES);
+
+    // Store submission hash to prevent duplicates
+    $_SESSION['processed_submissions'][$booking_id][] = $submission_hash;
+    echo json_encode(['success' => true, 'message' => 'Container details updated']);
+    exit;
+}
+
+// Handle AJAX requests
+if (isset($_GET['ajax'])) {
+    header('Content-Type: application/json');
+    
+    switch ($_GET['ajax']) {
+        case 'search_locations':
+            searchLocations($pdo, $_GET['query'] ?? '');
+            break;
+        case 'search_vehicles':
+            searchVehicles($pdo, $_GET['query'] ?? '');
+            break;
+        case 'search_vendors':
+            searchVendors($pdo, $_GET['query'] ?? '');
+            break;
+        case 'search_l1_supervisors':
+            searchL1Supervisors($pdo, $_GET['query'] ?? '');
+            break;
+        case 'acknowledge_booking':
+            acknowledgeBooking($pdo, $_POST['booking_id'] ?? 0);
+            break;
+        case 'get_booking_containers':
+            getBookingContainers($pdo, $_GET['booking_id'] ?? 0);
+            break;
+        default:
+            echo json_encode(['error' => 'Invalid request']);
+    }
+    exit();
+}
+
+// AJAX Functions
+function getBookingContainers($pdo, $booking_id) {
+    $stmt = $pdo->prepare("SELECT no_of_containers as total_containers FROM bookings WHERE id = ?");
+    $stmt->execute([$booking_id]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($booking) {
+        echo json_encode(['success' => true, 'total_containers' => $booking['total_containers']]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Booking not found']);
+    }
+}
+
+function searchL1Supervisors($pdo, $query) {
+    $query = '%' . trim($query) . '%';
+    $stmt = $pdo->prepare("
+        SELECT id, full_name, phone_number, email
+        FROM users 
+        WHERE (full_name LIKE ? OR phone_number LIKE ?) 
+        AND role = 'l1_supervisor'
+        ORDER BY full_name LIMIT 10
+    ");
+    $stmt->execute([$query, $query]);
+    echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function searchLocations($pdo, $query) {
+    $query = '%' . trim($query) . '%';
+    
     try {
-        if (isset($_POST['action'])) {
-            $booking_id = $_POST['booking_id'];
-            $action = $_POST['action'];
+        // Search regular locations
+        $stmt = $pdo->prepare("
+            SELECT 
+                id, 
+                location as name, 
+                'location' as type,
+                CONCAT('LOC-', id) as unique_id
+            FROM location 
+            WHERE location LIKE ? 
+            ORDER BY location 
+            LIMIT 10
+        ");
+        $stmt->execute([$query]);
+        $locations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Search yard locations
+        $stmt = $pdo->prepare("
+            SELECT 
+                id, 
+                yard_name as name, 
+                'yard' as type,
+                CONCAT('YARD-', id) as unique_id
+            FROM yard_locations 
+            WHERE yard_name LIKE ? 
+            AND is_active = 1 
+            ORDER BY yard_name 
+            LIMIT 10
+        ");
+        $stmt->execute([$query]);
+        $yards = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Combine and return results with type information
+        $all_locations = array_merge($locations, $yards);
+        
+        // Add display formatting
+        foreach ($all_locations as &$location) {
+            $location['display_name'] = $location['name'] . ' (' . strtoupper($location['type']) . ')';
+            $location['value'] = $location['type'] . '|' . $location['id']; // Format: "location|123" or "yard|456"
+        }
+        
+        echo json_encode($all_locations);
+        
+    } catch (Exception $e) {
+        error_log("Error in searchLocations: " . $e->getMessage());
+        echo json_encode([]);
+    }
+}
+function searchVehicles($pdo, $query) {
+    $query = '%' . trim($query) . '%';
+    
+    try {
+        // Search owned vehicles - using correct column names from your schema
+        $stmt = $pdo->prepare("
+            SELECT 
+                id, 
+                vehicle_number, 
+                COALESCE(make_model, '') as make, 
+                '' as model,  
+                COALESCE(driver_name, 'No Driver') as driver_name,
+                'owned' as vehicle_type,
+                COALESCE(current_status, 'unknown') as status
+            FROM vehicles 
+            WHERE (
+                vehicle_number LIKE ? 
+                OR COALESCE(make_model, '') LIKE ? 
+                OR COALESCE(driver_name, '') LIKE ?
+                OR COALESCE(owner_name, '') LIKE ?
+            )
+            AND (
+                current_status IN ('available', 'on_trip', 'maintenance', 'inactive') 
+                OR current_status IS NULL
+            )
+            AND (
+                approval_status = 'approved' 
+                OR approval_status IS NULL
+            )
+            AND (deleted_at IS NULL)  -- Exclude soft-deleted records
+            ORDER BY vehicle_number 
+            LIMIT 10
+        ");
+        $stmt->execute([$query, $query, $query, $query]);
+        $owned_vehicles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Search vendor vehicles - using correct column names from your schema
+        $stmt = $pdo->prepare("
+            SELECT 
+                id, 
+                vehicle_number, 
+                COALESCE(make, '') as make, 
+                COALESCE(model, '') as model,  
+                COALESCE(driver_name, 'No Driver') as driver_name,
+                'vendor' as vehicle_type,
+                COALESCE(status, 'unknown') as status
+            FROM vendor_vehicles 
+            WHERE (
+                vehicle_number LIKE ? 
+                OR COALESCE(make, '') LIKE ? 
+                OR COALESCE(model, '') LIKE ?
+                OR COALESCE(driver_name, '') LIKE ?
+            )
+            AND (
+                status IN ('active', 'inactive', 'maintenance') 
+                OR status IS NULL
+            )
+            AND (deleted_at IS NULL)  -- Exclude soft-deleted records
+            ORDER BY vehicle_number 
+            LIMIT 10
+        ");
+        $stmt->execute([$query, $query, $query, $query]);
+        $vendor_vehicles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Combine results
+        $all_vehicles = array_merge($owned_vehicles, $vendor_vehicles);
+        
+        // Debug logging
+        error_log("Vehicle search query: " . trim($query, '%'));
+        error_log("Owned vehicles found: " . count($owned_vehicles));
+        error_log("Vendor vehicles found: " . count($vendor_vehicles));
+        error_log("Total vehicles found: " . count($all_vehicles));
+        
+        // If no results, try a simpler search without status filters
+        if (empty($all_vehicles)) {
+            error_log("No vehicles found with status filters, trying without filters...");
             
-            $pdo->beginTransaction();
+            // Retry without status filters
+            $stmt = $pdo->prepare("
+                SELECT 
+                    id, 
+                    vehicle_number, 
+                    COALESCE(make_model, '') as make,
+                    '' as model,
+                    COALESCE(driver_name, 'No Driver') as driver_name,
+                    'owned' as vehicle_type,
+                    COALESCE(current_status, 'unknown') as status
+                FROM vehicles 
+                WHERE vehicle_number LIKE ? 
+                AND (deleted_at IS NULL)
+                ORDER BY vehicle_number 
+                LIMIT 5
+            ");
+            $stmt->execute([$query]);
+            $owned_simple = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            switch ($action) {
-                case 'assign_owned_vehicle':
-                    handleOwnedVehicleAssignment($pdo, $_POST);
-                    break;
-                    
-                case 'assign_vendor_vehicle':
-                    handleVendorVehicleAssignment($pdo, $_POST);
-                    break;
-                    
-                case 'reject_booking':
-                    handleBookingRejection($pdo, $_POST);
-                    break;
-                    
-                default:
-                    throw new Exception("Invalid action");
-            }
+            $stmt = $pdo->prepare("
+                SELECT 
+                    id, 
+                    vehicle_number, 
+                    COALESCE(make, '') as make,
+                    COALESCE(model, '') as model,
+                    COALESCE(driver_name, 'No Driver') as driver_name,
+                    'vendor' as vehicle_type,
+                    COALESCE(status, 'unknown') as status
+                FROM vendor_vehicles 
+                WHERE vehicle_number LIKE ? 
+                AND (deleted_at IS NULL)
+                ORDER BY vehicle_number 
+                LIMIT 5
+            ");
+            $stmt->execute([$query]);
+            $vendor_simple = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            $pdo->commit();
-            $success_message = "Booking processed successfully!";
+            $all_vehicles = array_merge($owned_simple, $vendor_simple);
+            error_log("Simplified search found: " . count($all_vehicles) . " vehicles");
+        }
+        
+        echo json_encode($all_vehicles);
+        
+    } catch (PDOException $e) {
+        error_log("Database error in searchVehicles: " . $e->getMessage());
+        echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
+    } catch (Exception $e) {
+        error_log("General error in searchVehicles: " . $e->getMessage());
+        echo json_encode(['error' => 'Search error: ' . $e->getMessage()]);
+    }
+}
+
+function searchVendors($pdo, $query) {
+    $query = '%' . trim($query) . '%';
+    $stmt = $pdo->prepare("
+        SELECT id, vendor_code, company_name, contact_person, mobile, email
+        FROM vendors 
+        WHERE (company_name LIKE ? OR vendor_code LIKE ? OR contact_person LIKE ?) 
+        AND status = 'active'
+        ORDER BY company_name LIMIT 10
+    ");
+    $stmt->execute([$query, $query, $query]);
+    echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+// New function to search unlinked vehicles (not tied to any vendor)
+function searchUnlinkedVehicles($pdo, $query) {
+    $query = '%' . trim($query) . '%';
+    
+    try {
+        // Search for vehicles that have been used in the past but aren't vendor-specific
+        // These could be from a general vehicle pool or previously hired vehicles
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT
+                vehicle_number,
+                COALESCE(make_model, CONCAT(COALESCE(make, ''), ' ', COALESCE(model, ''))) as vehicle_description,
+                'unlinked' as vehicle_type
+            FROM (
+                -- Get vehicles from past trips that might be available for hire
+                SELECT 
+                    reference_number as vehicle_number,
+                    CONCAT('Trip Vehicle - ', reference_number) as make_model
+                FROM trips 
+                WHERE reference_number LIKE ?
+                
+                UNION
+                
+                -- Get any other vehicle records that match the search
+                SELECT 
+                    vehicle_number,
+                    make_model
+                FROM vehicles 
+                WHERE vehicle_number LIKE ? 
+                AND deleted_at IS NULL
+                
+                UNION
+                
+                -- Get vendor vehicles that could be referenced
+                SELECT 
+                    vehicle_number,
+                    CONCAT(COALESCE(make, ''), ' ', COALESCE(model, '')) as make_model
+                FROM vendor_vehicles 
+                WHERE vehicle_number LIKE ? 
+                AND deleted_at IS NULL
+            ) as all_vehicles
+            ORDER BY vehicle_number 
+            LIMIT 10
+        ");
+        $stmt->execute([$query, $query, $query]);
+        $vehicles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        echo json_encode($vehicles);
+        
+    } catch (Exception $e) {
+        error_log("Error in searchUnlinkedVehicles: " . $e->getMessage());
+        echo json_encode([]);
+    }
+}
+
+
+function acknowledgeBooking($pdo, $booking_id) {
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE bookings 
+            SET status = 'being_addressed',
+                acknowledged_by = ?,
+                acknowledged_at = NOW(),
+                updated_by = ?,
+                updated_at = NOW()
+            WHERE id = ? AND status = 'pending'
+        ");
+        $result = $stmt->execute([$_SESSION['user_id'], $_SESSION['user_id'], $booking_id]);
+        
+        if ($result && $stmt->rowCount() > 0) {
+            // Log activity
+            $stmt = $pdo->prepare("
+                INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
+                VALUES (?, 'booking_acknowledged', ?, ?, NOW())
+            ");
+            $description = "Booking acknowledged by " . $_SESSION['full_name'] . " - Started processing";
+            $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
+            
+            echo json_encode(['success' => true, 'message' => 'Booking acknowledged successfully']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Booking not found or already processed']);
         }
     } catch (Exception $e) {
-        $pdo->rollback();
-        $error_message = "Error processing booking: " . $e->getMessage();
+        echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
     }
 }
 
-// Function to handle owned vehicle assignment
-function handleOwnedVehicleAssignment($pdo, $data) {
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_GET['ajax'])) {
+    try {
+        $action = $_POST['action'] ?? '';
+        
+        $pdo->beginTransaction();
+        
+        switch ($action) {
+            case 'contact_l1':
+                handleL1Contact($pdo, $_POST);
+                break;
+            case 'upload_container_images':
+                handleContainerImageUpload($pdo, $_POST, $_FILES);
+                break;
+            case 'assign_vehicles':
+                handleVehicleAssignment($pdo, $_POST);
+                break;
+            default:
+                throw new Exception("Invalid action");
+        }
+        
+        $pdo->commit();
+        $success_message = "Action completed successfully!";
+        
+    } catch (Exception $e) {
+        $pdo->rollback();
+        $error_message = "Error: " . $e->getMessage();
+    }
+}
+
+// Function to handle L1 supervisor contact
+function handleL1Contact($pdo, $data) {
     $booking_id = $data['booking_id'];
-    $vehicle_id = $data['vehicle_id'];
-    $driver_notes = $data['driver_notes'] ?? '';
+    $l1_contact = $data['l1_contact'];
+    $message = $data['whatsapp_message'];
     
-    // Check if booking exists and is in pending status
-    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND status = 'pending'");
-    $stmt->execute([$booking_id]);
-    $booking = $stmt->fetch();
-    
-    if (!$booking) {
-        throw new Exception("Booking not found or not in pending status");
-    }
-    
-    // Check if vehicle is available
-    $stmt = $pdo->prepare("SELECT * FROM vehicles WHERE id = ? AND current_status IN ('available', 'idle') AND approval_status = 'approved'");
-    $stmt->execute([$vehicle_id]);
-    $vehicle = $stmt->fetch();
-    
-    if (!$vehicle) {
-        throw new Exception("Selected vehicle is not available");
-    }
-    
-    // Update booking status to in_progress and assign vehicle
+    // Update booking status
     $stmt = $pdo->prepare("
         UPDATE bookings 
-        SET status = 'in_progress', 
-            assigned_vehicle_id = ?, 
-            vehicle_type = 'owned',
-            driver_notes = ?,
-            assigned_by = ?,
-            assigned_at = NOW(),
+        SET status = 'awaiting_containers',
+            l1_contacted_at = NOW(),
+            l1_contact_number = ?,
             updated_by = ?,
             updated_at = NOW()
         WHERE id = ?
     ");
-    $stmt->execute([$vehicle_id, $driver_notes, $_SESSION['user_id'], $_SESSION['user_id'], $booking_id]);
+    $stmt->execute([$l1_contact, $_SESSION['user_id'], $booking_id]);
     
-    // Update vehicle status to assigned
-    $stmt = $pdo->prepare("UPDATE vehicles SET current_status = 'assigned' WHERE id = ?");
-    $stmt->execute([$vehicle_id]);
-    
-    // Create activity log
+    // Log activity
     $stmt = $pdo->prepare("
         INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
-        VALUES (?, 'vehicle_assigned', ?, ?, NOW())
+        VALUES (?, 'l1_contacted', ?, ?, NOW())
     ");
-    $description = "Owned vehicle " . $vehicle['vehicle_number'] . " assigned by " . $_SESSION['full_name'];
+    $description = "L1 Supervisor contacted at " . $l1_contact . " for container details";
     $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
+    
+    // Here you would integrate with WhatsApp API
+    error_log("WhatsApp message to {$l1_contact}: {$message}");
 }
 
-// Function to handle vendor vehicle assignment (needs approval)
-function handleVendorVehicleAssignment($pdo, $data) {
-    $booking_id = $data['booking_id'];
-    $vendor_id = $data['vendor_id'];
-    $vehicle_details = $data['vehicle_details'];
-    $driver_name = $data['driver_name'];
-    $driver_contact = $data['driver_contact'];
-    $rate_per_day = floatval($data['rate_per_day']);
-    $estimated_days = intval($data['estimated_days']);
-    $total_cost = $rate_per_day * $estimated_days;
-    $notes = $data['vendor_notes'] ?? '';
+// Function to handle container image upload
+function debugContainerStatus($pdo, $booking_id) {
+    error_log("=== DEBUG: Container Status for Booking ID: $booking_id ===");
     
-    // Validate inputs
-    if ($rate_per_day <= 0) {
-        throw new Exception("Rate per day must be greater than 0");
-    }
-    
-    if ($estimated_days <= 0) {
-        throw new Exception("Estimated days must be greater than 0");
-    }
-    
-    // Check if booking exists and is in pending status
-    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND status = 'pending'");
+    // Check total containers expected
+    $stmt = $pdo->prepare("SELECT no_of_containers FROM bookings WHERE id = ?");
     $stmt->execute([$booking_id]);
-    $booking = $stmt->fetch();
+    $total_expected = $stmt->fetchColumn();
+    error_log("Total containers expected: " . ($total_expected ?? 'NULL'));
     
-    if (!$booking) {
-        throw new Exception("Booking not found or not in pending status");
-    }
-    
-    // Check if vendor exists and is active
-    $stmt = $pdo->prepare("SELECT * FROM vendors WHERE id = ? AND status = 'active'");
-    $stmt->execute([$vendor_id]);
-    $vendor = $stmt->fetch();
-    
-    if (!$vendor) {
-        throw new Exception("Selected vendor is not available");
-    }
-    
-    // Update booking status to pending_vendor_approval
+    // Check containers in database
     $stmt = $pdo->prepare("
-        UPDATE bookings 
-        SET status = 'pending_vendor_approval',
-            vendor_id = ?,
-            vendor_vehicle_details = ?,
-            vendor_driver_name = ?,
-            vendor_driver_contact = ?,
-            vendor_rate_per_day = ?,
-            vendor_estimated_days = ?,
-            vendor_total_cost = ?,
-            vendor_notes = ?,
-            assigned_by = ?,
-            assigned_at = NOW(),
-            updated_by = ?,
-            updated_at = NOW()
-        WHERE id = ?
+        SELECT 
+            id,
+            container_sequence,
+            container_number_1,
+            container_type,
+            from_location_id,
+            to_location_id,
+            CASE WHEN container_number_1 IS NOT NULL AND container_number_1 != '' THEN 1 ELSE 0 END as is_filled
+        FROM booking_containers 
+        WHERE booking_id = ?
+        ORDER BY container_sequence
     ");
+    $stmt->execute([$booking_id]);
+    $containers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    error_log("Containers found in database: " . count($containers));
+    foreach ($containers as $container) {
+        error_log("Container {$container['container_sequence']}: number={$container['container_number_1']}, type={$container['container_type']}, filled={$container['is_filled']}");
+    }
+    
+    // Count filled containers
+    $filled_count = array_sum(array_column($containers, 'is_filled'));
+    error_log("Filled containers count: $filled_count");
+    
+    // Check current booking status
+    $stmt = $pdo->prepare("SELECT status FROM bookings WHERE id = ?");
+    $stmt->execute([$booking_id]);
+    $current_status = $stmt->fetchColumn();
+    error_log("Current booking status: $current_status");
+    
+    error_log("=== END DEBUG ===");
+    
+    return [
+        'total_expected' => $total_expected,
+        'total_in_db' => count($containers),
+        'filled_count' => $filled_count,
+        'current_status' => $current_status,
+        'should_be_ready' => ($filled_count >= $total_expected && $total_expected > 0)
+    ];
+}
+
+// Fixed handleContainerImageUpload function with better status logic
+function handleContainerImageUpload($pdo, $data, $files) {
+    $booking_id = $data['booking_id'];
+    $container_updates = $data['containers'] ?? [];
+    $total_containers = $data['total_containers'] ?? 0;
+    
+    $upload_dir = 'uploads/container_images/' . $booking_id . '/';
+    if (!file_exists($upload_dir)) {
+        mkdir($upload_dir, 0755, true);
+    }
+    
+    $processed_count = 0;
+    
+    foreach ($container_updates as $key => $container_data) {
+        // Skip if no meaningful data provided
+        if (empty($container_data['number1']) && empty($container_data['id']) && 
+            empty($container_data['container_type'])) {
+            continue;
+        }
+        
+        // Parse location data with type information
+        $from_location_data = parseLocationData($container_data['from_location'] ?? '');
+        $to_location_data = parseLocationData($container_data['to_location'] ?? '');
+        
+        $image1_path = null;
+        $image2_path = null;
+        
+        if (isset($files['container_images'])) {
+            foreach ($files['container_images']['tmp_name'] as $file_key => $tmp_name) {
+                if (strpos($file_key, "container_${key}_image1") !== false && $tmp_name) {
+                    $image1_path = uploadImage($tmp_name, $upload_dir, "container_${key}_image1");
+                }
+                if (strpos($file_key, "container_${key}_image2") !== false && $tmp_name) {
+                    $image2_path = uploadImage($tmp_name, $upload_dir, "container_${key}_image2");
+                }
+            }
+        }
+        
+        if (!empty($container_data['id'])) {
+            // Update existing container
+            $stmt = $pdo->prepare("
+                UPDATE booking_containers 
+                SET container_number_1 = COALESCE(NULLIF(?, ''), container_number_1),
+                    container_number_2 = COALESCE(NULLIF(?, ''), container_number_2),
+                    container_type = COALESCE(NULLIF(?, ''), container_type),
+                    from_location_id = COALESCE(?, from_location_id),
+                    from_location_type = COALESCE(?, from_location_type),
+                    to_location_id = COALESCE(?, to_location_id),
+                    to_location_type = COALESCE(?, to_location_type),
+                    container_image_1 = COALESCE(?, container_image_1),
+                    container_image_2 = COALESCE(?, container_image_2),
+                    updated_by = ?,
+                    updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                $container_data['number1'] ?? null,
+                $container_data['number2'] ?? null,
+                $container_data['container_type'] ?? null,
+                $from_location_data['id'],
+                $from_location_data['type'],
+                $to_location_data['id'],
+                $to_location_data['type'],
+                $image1_path,
+                $image2_path,
+                $_SESSION['user_id'],
+                $container_data['id']
+            ]);
+        } else {
+            // Insert new container only if we have essential data
+            if (!empty($container_data['number1']) || !empty($container_data['container_type'])) {
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) as seq FROM booking_containers WHERE booking_id = ?
+                ");
+                $stmt->execute([$booking_id]);
+                $seq = $stmt->fetchColumn() + 1;
+                
+                $stmt = $pdo->prepare("
+                    INSERT INTO booking_containers (
+                        booking_id, container_sequence, container_type,
+                        container_number_1, container_number_2,
+                        from_location_id, from_location_type,
+                        to_location_id, to_location_type,
+                        container_image_1, container_image_2,
+                        created_by, created_at, updated_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
+                ");
+                $stmt->execute([
+                    $booking_id,
+                    $seq,
+                    $container_data['container_type'] ?? null,
+                    $container_data['number1'] ?? null,
+                    $container_data['number2'] ?? null,
+                    $from_location_data['id'],
+                    $from_location_data['type'],
+                    $to_location_data['id'],
+                    $to_location_data['type'],
+                    $image1_path,
+                    $image2_path,
+                    $_SESSION['user_id'],
+                    $_SESSION['user_id']
+                ]);
+            }
+        }
+        
+        $processed_count++;
+    }
+    
+    if ($processed_count > 0) {
+        // Debug current state
+        $debug_info = debugContainerStatus($pdo, $booking_id);
+        
+        // FIXED: Better logic for determining if containers are ready
+        // Count containers that have meaningful data (number OR type filled)
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) 
+            FROM booking_containers 
+            WHERE booking_id = ? 
+            AND (
+                (container_number_1 IS NOT NULL AND container_number_1 != '') 
+                OR 
+                (container_type IS NOT NULL AND container_type != '')
+            )
+        ");
+        $stmt->execute([$booking_id]);
+        $filled_count = $stmt->fetchColumn();
+        
+        // Also check total containers that exist (even if partially filled)
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM booking_containers WHERE booking_id = ?");
+        $stmt->execute([$booking_id]);
+        $total_existing = $stmt->fetchColumn();
+        
+        error_log("After update - Filled: $filled_count, Total existing: $total_existing, Expected: $total_containers");
+        
+        // Determine new status based on completion
+        $new_status = 'awaiting_containers'; // Default
+        
+        if ($filled_count >= $total_containers && $total_containers > 0) {
+            // All required containers have been filled with details
+            $new_status = 'containers_updated';
+        } elseif ($filled_count > 0) {
+            // Some containers filled, but not all
+            $new_status = 'awaiting_containers';
+        }
+        
+        error_log("Setting new status to: $new_status");
+        
+        $stmt = $pdo->prepare("
+            UPDATE bookings 
+            SET status = ?,
+                updated_by = ?,
+                updated_at = NOW()
+            WHERE id = ?
+        ");
+        $stmt->execute([$new_status, $_SESSION['user_id'], $booking_id]);
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
+            VALUES (?, 'container_updated', ?, ?, NOW())
+        ");
+        $description = "Container update: $filled_count of $total_containers containers completed. Status: $new_status";
+        $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
+    }
+}
+
+// Helper function to parse location data format: "type|id"
+function parseLocationData($location_value) {
+    if (empty($location_value)) {
+        return ['id' => null, 'type' => null];
+    }
+    
+    $parts = explode('|', $location_value);
+    if (count($parts) == 2) {
+        return [
+            'type' => $parts[0], // 'location' or 'yard'
+            'id' => (int)$parts[1]
+        ];
+    }
+    
+    // Fallback for old format (just numeric ID)
+    if (is_numeric($location_value)) {
+        return [
+            'type' => 'location', // Default to location table
+            'id' => (int)$location_value
+        ];
+    }
+    
+    return ['id' => null, 'type' => null];
+}
+
+// Helper function to upload images
+function uploadImage($tmp_name, $upload_dir, $filename) {
+    $allowed_types = ['image/jpeg', 'image/png', 'image/jpg'];
+    $file_info = getimagesize($tmp_name);
+    
+    if (!in_array($file_info['mime'], $allowed_types)) {
+        throw new Exception("Invalid image type");
+    }
+    
+    $extension = $file_info['mime'] == 'image/png' ? '.png' : '.jpg';
+    $file_path = $upload_dir . $filename . '_' . time() . $extension;
+    
+    if (move_uploaded_file($tmp_name, $file_path)) {
+        return $file_path;
+    }
+    
+    throw new Exception("Failed to upload image");
+}
+
+// Updated vehicle assignment function with vendor workflow
+function handleVehicleAssignment($pdo, $data) {
+    $booking_id = $data['booking_id'];
+    $assignments = $data['assignments'] ?? [];
+    
+    foreach ($assignments as $container_id => $assignment) {
+        $vehicle_type = $assignment['vehicle_type']; // 'owned' or 'vendor'
+        
+        if ($vehicle_type === 'owned') {
+            // Handle owned vehicles (existing logic)
+            $vehicle_id = $assignment['vehicle_id'];
+            
+            $stmt = $pdo->prepare("
+                UPDATE booking_containers 
+                SET assigned_vehicle_id = ?,
+                    vehicle_type = 'owned',
+                    assignment_status = 'assigned',
+                    updated_by = ?,
+                    updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([$vehicle_id, $_SESSION['user_id'], $container_id]);
+            
+            $trip_id = createTripForContainer($pdo, $booking_id, $container_id, 'owned', $vehicle_id, null);
+            
+            $stmt = $pdo->prepare("
+                UPDATE booking_containers 
+                SET trip_id = ?, assignment_status = 'trip_created'
+                WHERE id = ?
+            ");
+            $stmt->execute([$trip_id, $container_id]);
+            
+        } elseif ($vehicle_type === 'vendor') {
+            // Handle vendor vehicles (new workflow)
+            $vendor_id = $assignment['vendor_id'];
+            $vehicle_number = $assignment['vehicle_number'];
+            $vendor_rate = $assignment['vendor_rate'] ?? 0;
+            
+            // Create a vendor vehicle assignment record
+            $stmt = $pdo->prepare("
+                INSERT INTO vendor_vehicle_assignments (
+                    booking_id, container_id, vendor_id, vehicle_number, 
+                    daily_rate, assignment_status, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'pending_confirmation', ?, NOW())
+            ");
+            $stmt->execute([$booking_id, $container_id, $vendor_id, $vehicle_number, $vendor_rate, $_SESSION['user_id']]);
+            $assignment_id = $pdo->lastInsertId();
+            
+            // Update container with vendor assignment info
+            $stmt = $pdo->prepare("
+                UPDATE booking_containers 
+                SET vendor_assignment_id = ?,
+                    vehicle_type = 'vendor',
+                    assignment_status = 'vendor_assigned',
+                    updated_by = ?,
+                    updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([$assignment_id, $_SESSION['user_id'], $container_id]);
+            
+            // Send email to vendor
+            sendVendorAssignmentEmail($pdo, $assignment_id);
+            
+            // Create trip with vendor details
+            $trip_id = createVendorTripForContainer($pdo, $booking_id, $container_id, $vendor_id, $vehicle_number, $vendor_rate);
+            
+            $stmt = $pdo->prepare("
+                UPDATE booking_containers 
+                SET trip_id = ?, assignment_status = 'trip_created'
+                WHERE id = ?
+            ");
+            $stmt->execute([$trip_id, $container_id]);
+        }
+    }
+    
+    // Check completion status (existing logic)
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*) as total,
+               SUM(CASE WHEN (assigned_vehicle_id IS NOT NULL OR vendor_assignment_id IS NOT NULL) THEN 1 ELSE 0 END) as assigned
+        FROM booking_containers 
+        WHERE booking_id = ?
+    ");
+    $stmt->execute([$booking_id]);
+    $counts = $stmt->fetch();
+    
+    if ($counts['total'] == $counts['assigned'] && $counts['total'] > 0) {
+        $stmt = $pdo->prepare("
+            UPDATE bookings 
+            SET status = 'confirmed', updated_by = ?, updated_at = NOW()
+            WHERE id = ?
+        ");
+        $stmt->execute([$_SESSION['user_id'], $booking_id]);
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
+            VALUES (?, 'booking_completed', ?, ?, NOW())
+        ");
+        $description = "Booking completed - all " . $counts['total'] . " containers assigned and trips created";
+        $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
+    } else {
+        $stmt = $pdo->prepare("
+            UPDATE bookings 
+            SET status = 'partially_fulfilled', updated_by = ?, updated_at = NOW()
+            WHERE id = ?
+        ");
+        $stmt->execute([$_SESSION['user_id'], $booking_id]);
+    }
+}
+
+// Function to create trip for vendor vehicle
+function createVendorTripForContainer($pdo, $booking_id, $container_id, $vendor_id, $vehicle_number, $vendor_rate) {
+    // Get booking and container details
+    $stmt = $pdo->prepare("
+        SELECT b.*, bc.*, c.client_name, v.company_name as vendor_name
+        FROM bookings b 
+        JOIN booking_containers bc ON b.id = bc.booking_id
+        LEFT JOIN clients c ON b.client_id = c.id 
+        LEFT JOIN vendors v ON v.id = ?
+        WHERE b.id = ? AND bc.id = ?
+    ");
+    $stmt->execute([$vendor_id, $booking_id, $container_id]);
+    $details = $stmt->fetch();
+    
+    if (!$details) {
+        throw new Exception("Booking or container not found");
+    }
+    
+    $reference_number = 'VTR-' . date('Y') . '-' . str_pad($booking_id . $details['container_sequence'], 6, '0', STR_PAD_LEFT);
+    
+    // Get location names
+    $from_location_name = getLocationDisplayName($pdo, $details['from_location_id'], $details['from_location_type']);
+    $to_location_name = getLocationDisplayName($pdo, $details['to_location_id'], $details['to_location_type']);
+    
+    $stmt = $pdo->prepare("
+        INSERT INTO trips (
+            reference_number, trip_date, vehicle_number, vehicle_type, movement_type,
+            client_id, container_type, container_size, from_location, to_location, 
+            booking_number, is_vendor_vehicle, vendor_id, vendor_rate, status, 
+            created_at, updated_at
+        ) VALUES (?, CURDATE(), ?, 'vendor', 'export', ?, ?, ?, ?, ?, ?, 1, ?, ?, 'pending', NOW(), NOW())
+    ");
+    
     $stmt->execute([
-        $vendor_id, $vehicle_details, $driver_name, $driver_contact,
-        $rate_per_day, $estimated_days, $total_cost, $notes,
-        $_SESSION['user_id'], $_SESSION['user_id'], $booking_id
+        $reference_number,
+        $vehicle_number,
+        $details['client_id'],
+        $details['container_type'],
+        $details['container_type'],
+        $from_location_name,
+        $to_location_name,
+        $details['booking_id'],
+        $vendor_id,
+        $vendor_rate
     ]);
     
-    // Create activity log
-    $stmt = $pdo->prepare("
-        INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
-        VALUES (?, 'vendor_vehicle_assigned', ?, ?, NOW())
-    ");
-    $description = "Vendor vehicle from " . $vendor['company_name'] . " assigned by " . $_SESSION['full_name'] . " - Awaiting manager approval for rate ₹" . number_format($total_cost, 2);
-    $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
+    return $pdo->lastInsertId();
 }
 
-// Function to handle booking rejection
-function handleBookingRejection($pdo, $data) {
-    $booking_id = $data['booking_id'];
-    $rejection_reason = trim($data['rejection_reason']);
+// Function to send email to vendor about vehicle assignment
+function sendVendorAssignmentEmail($pdo, $assignment_id) {
+    try {
+        // Get assignment details
+        $stmt = $pdo->prepare("
+            SELECT 
+                va.*, v.company_name, v.email, v.contact_person,
+                b.booking_id, bc.container_sequence, bc.container_type,
+                bc.container_number_1, c.client_name,
+                u.full_name as assigned_by
+            FROM vendor_vehicle_assignments va
+            JOIN vendors v ON va.vendor_id = v.id
+            JOIN bookings b ON va.booking_id = b.id
+            JOIN booking_containers bc ON va.container_id = bc.id
+            JOIN clients c ON b.client_id = c.id
+            JOIN users u ON va.created_by = u.id
+            WHERE va.id = ?
+        ");
+        $stmt->execute([$assignment_id]);
+        $assignment = $stmt->fetch();
+        
+        if (!$assignment || empty($assignment['email'])) {
+            error_log("No email found for vendor assignment ID: $assignment_id");
+            return false;
+        }
+        
+        // Get location details
+        $stmt = $pdo->prepare("
+            SELECT 
+                CASE 
+                    WHEN bc.from_location_type = 'yard' THEN yl_from.yard_name
+                    WHEN bc.from_location_type = 'location' THEN loc_from.location
+                    ELSE 'Not specified'
+                END as from_location,
+                CASE 
+                    WHEN bc.to_location_type = 'yard' THEN yl_to.yard_name
+                    WHEN bc.to_location_type = 'location' THEN loc_to.location
+                    ELSE 'Not specified'
+                END as to_location
+            FROM booking_containers bc
+            LEFT JOIN location loc_from ON bc.from_location_id = loc_from.id AND bc.from_location_type = 'location'
+            LEFT JOIN location loc_to ON bc.to_location_id = loc_to.id AND bc.to_location_type = 'location'
+            LEFT JOIN yard_locations yl_from ON bc.from_location_id = yl_from.id AND bc.from_location_type = 'yard'
+            LEFT JOIN yard_locations yl_to ON bc.to_location_id = yl_to.id AND bc.to_location_type = 'yard'
+            WHERE bc.id = ?
+        ");
+        $stmt->execute([$assignment['container_id']]);
+        $locations = $stmt->fetch();
+        
+        // Prepare email content
+        $subject = "Vehicle Assignment Request - Booking #{$assignment['booking_id']}";
+        
+        $email_body = "
+        <html>
+        <body style='font-family: Arial, sans-serif; color: #333;'>
+            <h2 style='color: #0d9488;'>Vehicle Assignment Request</h2>
+            
+            <p>Dear {$assignment['contact_person']},</p>
+            
+            <p>We have assigned your company a vehicle for transportation services. Please find the details below:</p>
+            
+            <div style='background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;'>
+                <h3 style='color: #0d9488; margin-top: 0;'>Assignment Details</h3>
+                <table style='width: 100%; border-collapse: collapse;'>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>Booking Reference:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>#{$assignment['booking_id']}</td></tr>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>Client:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>{$assignment['client_name']}</td></tr>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>Container:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>#{$assignment['container_sequence']} - {$assignment['container_number_1']}</td></tr>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>Container Type:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>{$assignment['container_type']}</td></tr>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>Vehicle Number:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>{$assignment['vehicle_number']}</td></tr>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>Daily Rate:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>$" . number_format($assignment['daily_rate'], 2) . "</td></tr>
+                </table>
+            </div>
+            
+            <div style='background: #e6fffa; padding: 20px; border-radius: 8px; margin: 20px 0;'>
+                <h3 style='color: #0d9488; margin-top: 0;'>Route Information</h3>
+                <table style='width: 100%; border-collapse: collapse;'>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>From Location:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>{$locations['from_location']}</td></tr>
+                    <tr><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'><strong>To Location:</strong></td><td style='padding: 8px 0; border-bottom: 1px solid #ddd;'>{$locations['to_location']}</td></tr>
+                </table>
+            </div>
+            
+            <div style='background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;'>
+                <h4 style='margin-top: 0; color: #856404;'>Next Steps:</h4>
+                <ul style='color: #856404;'>
+                    <li>Please confirm availability of the specified vehicle</li>
+                    <li>Ensure driver has all necessary documents</li>
+                    <li>Contact our operations team for pickup timing</li>
+                    <li>Vehicle should be ready for dispatch as per schedule</li>
+                </ul>
+            </div>
+            
+            <p>Assigned by: <strong>{$assignment['assigned_by']}</strong><br>
+            Assignment Date: <strong>" . date('F d, Y H:i', strtotime($assignment['created_at'])) . "</strong></p>
+            
+            <p>If you have any questions or concerns, please contact our operations team immediately.</p>
+            
+            <p>Best regards,<br>
+            Operations Team</p>
+        </body>
+        </html>
+        ";
+        
+        // Email headers
+        $headers = "MIME-Version: 1.0" . "\r\n";
+        $headers .= "Content-type:text/html;charset=UTF-8" . "\r\n";
+        $headers .= "From: operations@yourcompany.com" . "\r\n"; // Replace with your company email
+        
+        // Send email
+        $email_sent = mail($assignment['email'], $subject, $email_body, $headers);
+        
+        if ($email_sent) {
+            // Log successful email
+            $stmt = $pdo->prepare("
+                UPDATE vendor_vehicle_assignments 
+                SET email_sent_at = NOW(), email_status = 'sent'
+                WHERE id = ?
+            ");
+            $stmt->execute([$assignment_id]);
+            
+            error_log("Vendor assignment email sent successfully to: " . $assignment['email']);
+            return true;
+        } else {
+            error_log("Failed to send vendor assignment email to: " . $assignment['email']);
+            return false;
+        }
+        
+    } catch (Exception $e) {
+        error_log("Error sending vendor assignment email: " . $e->getMessage());
+        return false;
+    }
+}
+// Add this function to better determine booking status and available actions
+function getBookingStatusInfo($booking) {
+    $total_containers = $booking['no_of_containers'] ?? 0;
+    $filled_containers = $booking['filled_containers'] ?? 0;
+    $assigned_containers = $booking['assigned_containers'] ?? 0;
     
-    if (empty($rejection_reason)) {
-        throw new Exception("Rejection reason is required");
+    $status_info = [
+        'can_acknowledge' => false,
+        'can_contact_l1' => false,
+        'can_update_containers' => false,
+        'can_assign_vehicles' => false,
+        'is_complete' => false,
+        'progress_message' => '',
+        'next_action' => ''
+    ];
+    
+    switch ($booking['status']) {
+        case 'pending':
+            $status_info['can_acknowledge'] = true;
+            $status_info['next_action'] = 'Acknowledge booking to start processing';
+            break;
+            
+        case 'being_addressed':
+            $status_info['can_contact_l1'] = true;
+            $status_info['next_action'] = 'Contact L1 supervisor for container details';
+            break;
+            
+        case 'awaiting_containers':
+            $status_info['can_update_containers'] = true;
+            $status_info['progress_message'] = "Container details: {$filled_containers}/{$total_containers} completed";
+            $status_info['next_action'] = 'Update container details as they become available';
+            break;
+            
+        case 'containers_updated':
+            $status_info['can_update_containers'] = true; // Allow further updates if needed
+            $status_info['can_assign_vehicles'] = true;
+            $status_info['progress_message'] = "Ready for vehicle assignment ({$filled_containers}/{$total_containers} containers ready)";
+            $status_info['next_action'] = 'Assign vehicles to containers';
+            break;
+            
+        case 'partially_fulfilled':
+            $status_info['can_update_containers'] = true; // Allow container updates for remaining
+            $status_info['can_assign_vehicles'] = true; // Allow vehicle assignment for remaining
+            $status_info['progress_message'] = "Vehicles assigned: {$assigned_containers}/{$total_containers} containers";
+            $status_info['next_action'] = 'Assign vehicles to remaining containers';
+            break;
+            
+        case 'confirmed':
+            $status_info['is_complete'] = true;
+            $status_info['progress_message'] = "All containers assigned and trips created ({$assigned_containers}/{$total_containers})";
+            $status_info['next_action'] = 'Booking completed successfully';
+            break;
     }
     
-    // Check if booking exists and is in pending status
-    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND status = 'pending'");
-    $stmt->execute([$booking_id]);
-    $booking = $stmt->fetch();
-    
-    if (!$booking) {
-        throw new Exception("Booking not found or not in pending status");
-    }
-    
-    // Update booking status to rejected
-    $stmt = $pdo->prepare("
-        UPDATE bookings 
-        SET status = 'rejected',
-            rejection_reason = ?,
-            rejected_by = ?,
-            rejected_at = NOW(),
-            updated_by = ?,
-            updated_at = NOW()
-        WHERE id = ?
-    ");
-    $stmt->execute([$rejection_reason, $_SESSION['user_id'], $_SESSION['user_id'], $booking_id]);
-    
-    // Create activity log
-    $stmt = $pdo->prepare("
-        INSERT INTO booking_activities (booking_id, activity_type, description, created_by, created_at)
-        VALUES (?, 'booking_rejected', ?, ?, NOW())
-    ");
-    $description = "Booking rejected by " . $_SESSION['full_name'] . ": " . $rejection_reason;
-    $stmt->execute([$booking_id, $description, $_SESSION['user_id']]);
+    return $status_info;
 }
 
-// Get pending bookings for L2 supervisor to work on
+// Function to create trip for assigned container
+function createTripForContainer($pdo, $booking_id, $container_id, $vehicle_type, $vehicle_id, $vendor_rate) {
+    // Get booking and container details
+    $stmt = $pdo->prepare("
+        SELECT b.*, bc.*, c.client_name, bc.from_location_id, bc.to_location_id
+        FROM bookings b 
+        JOIN booking_containers bc ON b.id = bc.booking_id
+        LEFT JOIN clients c ON b.client_id = c.id 
+        WHERE b.id = ? AND bc.id = ?
+    ");
+    $stmt->execute([$booking_id, $container_id]);
+    $details = $stmt->fetch();
+    
+    if (!$details) {
+        throw new Exception("Booking or container not found");
+    }
+    
+    // Generate reference number
+    $reference_number = 'TR-' . date('Y') . '-' . str_pad($booking_id . $details['container_sequence'], 6, '0', STR_PAD_LEFT);
+    
+    // Determine locations (use container-specific or fall back to booking default)
+    $from_location = $details['from_location_id'] ?? $details['from_location_id'];
+    $to_location = $details['to_location_id'] ?? $details['to_location_id'];
+    
+    // Get location names
+    $from_location_name = '';
+    $to_location_name = '';
+    
+    if ($from_location) {
+        $stmt = $pdo->prepare("SELECT location FROM location WHERE id = ?");
+        $stmt->execute([$from_location]);
+        $result = $stmt->fetch();
+        $from_location_name = $result ? $result['location'] : '';
+    }
+    
+    if ($to_location) {
+        $stmt = $pdo->prepare("SELECT location FROM location WHERE id = ?");
+        $stmt->execute([$to_location]);
+        $result = $stmt->fetch();
+        $to_location_name = $result ? $result['location'] : '';
+    }
+    
+    // Create trip with vendor details if applicable
+    $stmt = $pdo->prepare("
+        INSERT INTO trips (
+            reference_number, trip_date, vehicle_id, vehicle_type, movement_type,
+            client_id, container_type, container_size, from_location, to_location, 
+            booking_number, is_vendor_vehicle, vendor_rate, status, 
+            created_at, updated_at
+        ) VALUES (?, CURDATE(), ?, ?, 'export', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW(), NOW())
+    ");
+    
+    $is_vendor_vehicle = ($vehicle_type === 'vendor') ? 1 : 0;
+    
+    $stmt->execute([
+        $reference_number,
+        $vehicle_id,
+        $vehicle_type,
+        $details['client_id'],
+        $details['container_type'],
+        $details['container_type'], // Using same value for size
+        $from_location_name,
+        $to_location_name,
+        $details['booking_id'],
+        $is_vendor_vehicle,
+        $vendor_rate
+    ]);
+    
+    return $pdo->lastInsertId();
+}
+
+// Get pending bookings - corrected query without using the view
 $pending_bookings = [];
 $stmt = $pdo->prepare("
     SELECT 
-        b.*,
+        b.id,
+        b.booking_id,
+        b.status,
+        COALESCE(b.no_of_containers, 0) as no_of_containers, -- Explicitly handle NULL
+        b.created_at, -- Ensure created_at is selected
         c.client_name,
         c.client_code,
         loc_from.location as from_location_name,
         loc_to.location as to_location_name,
         creator.full_name as created_by_name,
-        creator.role as creator_role
+        creator.role as creator_role,
+        ack_user.full_name as acknowledged_by_name,
+        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.assigned_vehicle_id IS NOT NULL) as assigned_containers,
+        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.container_number_1 IS NOT NULL) as filled_containers,
+        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.container_image_1 IS NOT NULL) as containers_with_images,
+        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.trip_id IS NOT NULL) as containers_with_trips
     FROM bookings b
     LEFT JOIN clients c ON b.client_id = c.id
     LEFT JOIN location loc_from ON b.from_location_id = loc_from.id
     LEFT JOIN location loc_to ON b.to_location_id = loc_to.id
     LEFT JOIN users creator ON b.created_by = creator.id
-    WHERE b.status = 'pending'
-    ORDER BY b.created_at ASC
+    LEFT JOIN users ack_user ON b.acknowledged_by = ack_user.id
+    WHERE b.status IN ('pending', 'being_addressed', 'awaiting_containers', 'containers_updated', 'partially_fulfilled')
+    GROUP BY b.id, b.booking_id
+    ORDER BY 
+        CASE b.status 
+            WHEN 'being_addressed' THEN 1
+            WHEN 'awaiting_containers' THEN 2
+            WHEN 'containers_updated' THEN 3
+            WHEN 'partially_fulfilled' THEN 4
+            ELSE 5
+        END,
+        b.created_at ASC
 ");
 $stmt->execute();
 $pending_bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get available owned vehicles
-$owned_vehicles = [];
-$stmt = $pdo->prepare("
-    SELECT id, vehicle_number, make_model, current_status, driver_name
-    FROM vehicles 
-    WHERE current_status IN ('available', 'idle') 
-    AND approval_status = 'approved'
-    ORDER BY vehicle_number
-");
-$stmt->execute();
-$owned_vehicles = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Get active vendors with corrected schema
-$vendors = [];
-$stmt = $pdo->prepare("
-    SELECT id, vendor_code, company_name, contact_person, mobile, email, vendor_type, total_vehicles
-    FROM vendors 
-    WHERE status = 'active'
-    ORDER BY company_name
-");
-$stmt->execute();
-$vendors = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Get statistics
-$stats = [
-    'pending' => count($pending_bookings),
-    'available_vehicles' => count($owned_vehicles),
-    'active_vendors' => count($vendors)
-];
-
-// Get container details for each booking
+// Update the loop to handle missing keys
 foreach ($pending_bookings as &$booking) {
+    // Fetch existing containers with proper location resolution
     $stmt = $pdo->prepare("
-        SELECT container_sequence, container_type, container_number_1, container_number_2,
-               from_location_id, to_location_id
-        FROM booking_containers 
-        WHERE booking_id = ? 
-        ORDER BY container_sequence
+        SELECT bc.*, 
+               -- From location handling based on type
+               CASE 
+                   WHEN bc.from_location_type = 'yard' THEN yl_from.yard_name
+                   WHEN bc.from_location_type = 'location' THEN loc_from.location
+                   ELSE 'Unknown Location'
+               END as from_location_name,
+               bc.from_location_type,
+               -- To location handling based on type  
+               CASE 
+                   WHEN bc.to_location_type = 'yard' THEN yl_to.yard_name
+                   WHEN bc.to_location_type = 'location' THEN loc_to.location
+                   ELSE 'Unknown Location'
+               END as to_location_name,
+               bc.to_location_type,
+               v.vehicle_number as owned_vehicle_number,
+               vv.vehicle_number as vendor_vehicle_number,
+               t.reference_number as trip_reference
+        FROM booking_containers bc
+        -- Left joins for regular locations
+        LEFT JOIN location loc_from ON bc.from_location_id = loc_from.id AND bc.from_location_type = 'location'
+        LEFT JOIN location loc_to ON bc.to_location_id = loc_to.id AND bc.to_location_type = 'location'
+        -- Left joins for yard locations
+        LEFT JOIN yard_locations yl_from ON bc.from_location_id = yl_from.id AND bc.from_location_type = 'yard'
+        LEFT JOIN yard_locations yl_to ON bc.to_location_id = yl_to.id AND bc.to_location_type = 'yard'
+        -- Vehicle and trip joins
+        LEFT JOIN vehicles v ON bc.assigned_vehicle_id = v.id AND bc.vehicle_type = 'owned'
+        LEFT JOIN vendor_vehicles vv ON bc.assigned_vehicle_id = vv.id AND bc.vehicle_type = 'vendor'
+        LEFT JOIN trips t ON bc.trip_id = t.id
+        WHERE bc.booking_id = ? 
+        ORDER BY bc.container_sequence
     ");
     $stmt->execute([$booking['id']]);
-    $containers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $existing_containers = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // Get location names for containers if they have individual locations
-    foreach ($containers as &$container) {
-        if ($container['from_location_id']) {
-            $stmt = $pdo->prepare("SELECT location FROM location WHERE id = ?");
-            $stmt->execute([$container['from_location_id']]);
-            $result = $stmt->fetch();
-            $container['from_location_name'] = $result ? $result['location'] : null;
-        }
-        
-        if ($container['to_location_id']) {
-            $stmt = $pdo->prepare("SELECT location FROM location WHERE id = ?");
-            $stmt->execute([$container['to_location_id']]);
-            $result = $stmt->fetch();
-            $container['to_location_name'] = $result ? $result['location'] : null;
-        }
-    }
-    
-    $booking['containers'] = $containers;
+    $booking['containers'] = $existing_containers;
+    $booking['containers_json'] = json_encode([
+        'total_containers' => $booking['no_of_containers'] ?? 0,
+        'existing_containers' => array_map(function($container) {
+            return [
+                'id' => $container['id'],
+                'container_sequence' => $container['container_sequence'],
+                'container_type' => $container['container_type'],
+                'container_number_1' => $container['container_number_1'],
+                'container_number_2' => $container['container_number_2'],
+                'from_location_id' => $container['from_location_id'],
+                'from_location_type' => $container['from_location_type'],
+                'from_location_name' => $container['from_location_name'],
+                'to_location_id' => $container['to_location_id'],
+                'to_location_type' => $container['to_location_type'],
+                'to_location_name' => $container['to_location_name'],
+                'container_image_1' => $container['container_image_1'],
+                'container_image_2' => $container['container_image_2'],
+                // Format location values for form fields
+                'from_location_value' => $container['from_location_type'] ? 
+                    $container['from_location_type'] . '|' . $container['from_location_id'] : '',
+                'to_location_value' => $container['to_location_type'] ? 
+                    $container['to_location_type'] . '|' . $container['to_location_id'] : ''
+            ];
+        }, $existing_containers),
+        'booking_id' => $booking['booking_id'],
+        'id' => $booking['id']
+    ]);
 }
-
-// Get recent activities for dashboard (optional)
-$recent_activities = [];
-$stmt = $pdo->prepare("
-    SELECT ba.*, b.booking_id, u.full_name as user_name
-    FROM booking_activities ba
-    LEFT JOIN bookings b ON ba.booking_id = b.id
-    LEFT JOIN users u ON ba.created_by = u.id
-    WHERE ba.created_by = ?
-    ORDER BY ba.created_at DESC
-    LIMIT 10
-");
-$stmt->execute([$_SESSION['user_id']]);
-$recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// Get statistics
+$stats = [
+    'pending' => count(array_filter($pending_bookings, fn($b) => $b['status'] === 'pending')),
+    'being_addressed' => count(array_filter($pending_bookings, fn($b) => $b['status'] === 'being_addressed')),
+    'awaiting_containers' => count(array_filter($pending_bookings, fn($b) => $b['status'] === 'awaiting_containers')),
+    'ready_to_assign' => count(array_filter($pending_bookings, fn($b) => $b['status'] === 'containers_updated')),
+    'partially_fulfilled' => count(array_filter($pending_bookings, fn($b) => $b['status'] === 'partially_fulfilled')),
+    'pending_approval' => 0 // No longer needed since vendor details go directly to trips
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pending Requests - Fleet Management</title>
+    <title>Pending Requests - L2 Supervisor</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
@@ -374,30 +1295,13 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
             letter-spacing: 0.05em;
         }
         
-        .status-pending {
-            background-color: #fef3c7;
-            color: #92400e;
-        }
-        
-        .status-pending_vendor_approval {
-            background-color: #ddd6fe;
-            color: #5b21b6;
-        }
-        
-        .status-in_progress {
-            background-color: #bfdbfe;
-            color: #1e40af;
-        }
-        
-        .status-completed {
-            background-color: #d1fae5;
-            color: #065f46;
-        }
-        
-        .status-rejected {
-            background-color: #fee2e2;
-            color: #991b1b;
-        }
+        .status-pending { background-color: #fef3c7; color: #92400e; }
+        .status-being_addressed { background-color: #dbeafe; color: #1e40af; }
+        .status-awaiting_containers { background-color: #fde68a; color: #d97706; }
+        .status-containers_updated { background-color: #c7f59b; color: #365314; }
+        .status-partially_fulfilled { background-color: #e0e7ff; color: #5b21b6; }
+        .status-pending_vendor_approval { background-color: #fecaca; color: #991b1b; }
+        .status-confirmed { background-color: #d1fae5; color: #065f46; }
         
         .input-enhanced {
             width: 100%;
@@ -430,32 +1334,16 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
             transform: translateY(-2px);
         }
         
-        .btn-primary {
-            background-color: #0d9488;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background-color: #0f766e;
-        }
-        
-        .btn-secondary {
-            background-color: #6b7280;
-            color: white;
-        }
-        
-        .btn-secondary:hover {
-            background-color: #4b5563;
-        }
-        
-        .btn-danger {
-            background-color: #dc2626;
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            background-color: #b91c1c;
-        }
+        .btn-primary { background-color: #0d9488; color: white; }
+        .btn-primary:hover { background-color: #0f766e; }
+        .btn-secondary { background-color: #6b7280; color: white; }
+        .btn-secondary:hover { background-color: #4b5563; }
+        .btn-success { background-color: #059669; color: white; }
+        .btn-success:hover { background-color: #047857; }
+        .btn-warning { background-color: #d97706; color: white; }
+        .btn-warning:hover { background-color: #b45309; }
+        .btn-danger { background-color: #dc2626; color: white; }
+        .btn-danger:hover { background-color: #b91c1c; }
         
         .modal {
             display: none;
@@ -470,25 +1358,145 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         .modal-content {
             background-color: white;
-            margin: 5% auto;
+            margin: 2% auto;
             border-radius: 12px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 90vh;
+            width: 95%;
+            max-width: 800px;
+            max-height: 95vh;
             overflow-y: auto;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
         }
         
-        .priority-high {
+        .search-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            display: none;
+        }
+        
+        .search-dropdown-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #f3f4f6;
+            transition: all 0.2s ease;
+        }
+        
+        .search-dropdown-item:hover {
+            background-color: #f0fdfa;
+        }
+        
+        .search-dropdown-item:last-child {
+            border-bottom: none;
+        }
+        
+        .container-card {
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .container-card.has-image {
+            border-color: #10b981;
+            background-color: #ecfdf5;
+        }
+        
+        .container-card.assigned {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        
+        .priority-urgent {
             border-left: 4px solid #dc2626;
         }
         
-        .priority-medium {
-            border-left: 4px solid #d97706;
+        .priority-high {
+            border-left: 4px solid #f59e0b;
         }
         
         .priority-normal {
-            border-left: 4px solid #059669;
+            border-left: 4px solid #10b981;
+        }
+        
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        
+        .step {
+            flex: 1;
+            text-align: center;
+            position: relative;
+        }
+        
+        .step-number {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .step.active .step-number {
+            background-color: #0d9488;
+            color: white;
+        }
+        
+        .step.completed .step-number {
+            background-color: #10b981;
+            color: white;
+        }
+        
+        .step.pending .step-number {
+            background-color: #e5e7eb;
+            color: #6b7280;
+        }
+        
+        .step-line {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            width: 100%;
+            height: 2px;
+            background-color: #e5e7eb;
+            z-index: -1;
+        }
+        
+        .step.completed .step-line {
+            background-color: #10b981;
+        }
+        
+        .file-upload-area {
+            border: 2px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .file-upload-area:hover {
+            border-color: #0d9488;
+            background-color: #f0fdfa;
+        }
+        
+        .file-upload-area.dragover {
+            border-color: #0d9488;
+            background-color: #f0fdfa;
         }
     </style>
 </head>
@@ -504,12 +1512,15 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="flex items-center justify-between">
                     <div>
                         <h1 class="text-2xl font-bold text-gray-900">Pending Requests</h1>
-                        <p class="text-sm text-gray-600 mt-1">Manage booking requests and assign vehicles</p>
+                        <p class="text-sm text-gray-600 mt-1">Process booking requests step by step</p>
                     </div>
                     <div class="flex items-center space-x-4">
                         <div class="bg-teal-50 px-4 py-2 rounded-lg">
-                            <span class="text-sm font-medium text-teal-800">L2 Supervisor Dashboard</span>
+                            <span class="text-sm font-medium text-teal-800">L2 Supervisor</span>
                         </div>
+                        <button onclick="refreshPage()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm">
+                            <i class="fas fa-sync-alt mr-2"></i>Refresh
+                        </button>
                     </div>
                 </div>
             </header>
@@ -534,41 +1545,30 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php endif; ?>
 
             <!-- Statistics Cards -->
-            <div class="mx-6 mt-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-white rounded-xl shadow-soft p-6 card-hover-effect">
-                    <div class="flex items-center">
-                        <div class="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-clock text-yellow-600 text-xl"></i>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-2xl font-bold text-gray-900"><?= $stats['pending'] ?></p>
-                            <p class="text-sm text-gray-600">Pending Requests</p>
-                        </div>
-                    </div>
+            <div class="mx-6 mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div class="bg-white rounded-lg shadow-soft p-4 text-center">
+                    <div class="text-2xl font-bold text-yellow-600"><?= $stats['pending'] ?></div>
+                    <div class="text-xs text-gray-600">New Requests</div>
                 </div>
-                
-                <div class="bg-white rounded-xl shadow-soft p-6 card-hover-effect">
-                    <div class="flex items-center">
-                        <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-truck text-green-600 text-xl"></i>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-2xl font-bold text-gray-900"><?= $stats['available_vehicles'] ?></p>
-                            <p class="text-sm text-gray-600">Available Vehicles</p>
-                        </div>
-                    </div>
+                <div class="bg-white rounded-lg shadow-soft p-4 text-center">
+                    <div class="text-2xl font-bold text-blue-600"><?= $stats['being_addressed'] ?></div>
+                    <div class="text-xs text-gray-600">In Progress</div>
                 </div>
-                
-                <div class="bg-white rounded-xl shadow-soft p-6 card-hover-effect">
-                    <div class="flex items-center">
-                        <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                            <i class="fas fa-handshake text-blue-600 text-xl"></i>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-2xl font-bold text-gray-900"><?= $stats['active_vendors'] ?></p>
-                            <p class="text-sm text-gray-600">Active Vendors</p>
-                        </div>
-                    </div>
+                <div class="bg-white rounded-lg shadow-soft p-4 text-center">
+                    <div class="text-2xl font-bold text-orange-600"><?= $stats['awaiting_containers'] ?></div>
+                    <div class="text-xs text-gray-600">Awaiting Info</div>
+                </div>
+                <div class="bg-white rounded-lg shadow-soft p-4 text-center">
+                    <div class="text-2xl font-bold text-green-600"><?= $stats['ready_to_assign'] ?></div>
+                    <div class="text-xs text-gray-600">Ready to Assign</div>
+                </div>
+                <div class="bg-white rounded-lg shadow-soft p-4 text-center">
+                    <div class="text-2xl font-bold text-purple-600"><?= $stats['partially_fulfilled'] ?></div>
+                    <div class="text-xs text-gray-600">Partial</div>
+                </div>
+                <div class="bg-white rounded-lg shadow-soft p-4 text-center">
+                    <div class="text-2xl font-bold text-red-600"><?= $stats['pending_approval'] ?></div>
+                    <div class="text-xs text-gray-600">Need Approval</div>
                 </div>
             </div>
 
@@ -581,8 +1581,8 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <div class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6">
                                 <i class="fas fa-clipboard-check text-3xl text-gray-400"></i>
                             </div>
-                            <h3 class="text-xl font-semibold text-gray-900 mb-2">No Pending Requests</h3>
-                            <p class="text-gray-600 mb-6">All booking requests have been processed. Great job!</p>
+                            <h3 class="text-xl font-semibold text-gray-900 mb-2">All Caught Up!</h3>
+                            <p class="text-gray-600 mb-6">No pending requests to process right now.</p>
                             <a href="dashboard.php" class="btn-enhanced btn-primary">
                                 <i class="fas fa-tachometer-alt mr-2"></i>
                                 Go to Dashboard
@@ -592,8 +1592,9 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <!-- Pending Requests List -->
                         <div class="space-y-6">
                             <?php foreach ($pending_bookings as $booking): ?>
-                                <div class="bg-white rounded-xl shadow-soft p-6 card-hover-effect priority-normal">
-                                    <div class="flex justify-between items-start mb-4">
+                                <div class="bg-white rounded-xl shadow-soft p-6 card-hover-effect priority-normal booking-card" data-booking-id="<?= $booking['id'] ?>">
+                                    <!-- Booking Header -->
+                                    <div class="flex justify-between items-start mb-6">
                                         <div>
                                             <h3 class="text-xl font-bold text-gray-900 mb-2">
                                                 Booking #<?= htmlspecialchars($booking['booking_id']) ?>
@@ -605,6 +1606,11 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 <span class="px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-xs font-medium">
                                                     <?= $booking['no_of_containers'] ?> Container<?= $booking['no_of_containers'] > 1 ? 's' : '' ?>
                                                 </span>
+                                                <?php if ($booking['acknowledged_by_name']): ?>
+                                                    <span class="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                                                        Working: <?= htmlspecialchars($booking['acknowledged_by_name']) ?>
+                                                    </span>
+                                                <?php endif; ?>
                                             </div>
                                         </div>
                                         <div class="text-right">
@@ -612,6 +1618,29 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                             <p class="font-medium text-gray-900"><?= htmlspecialchars($booking['created_by_name']) ?></p>
                                             <p class="text-xs text-gray-500"><?= ucfirst(str_replace('_', ' ', $booking['creator_role'])) ?></p>
                                             <p class="text-xs text-gray-500 mt-1"><?= date('M d, Y H:i', strtotime($booking['created_at'])) ?></p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Step Indicator -->
+                                    <div class="step-indicator">
+                                        <div class="step <?= in_array($booking['status'], ['pending']) ? 'active' : 'completed' ?>">
+                                            <div class="step-number">1</div>
+                                            <div class="text-xs">Acknowledge</div>
+                                            <div class="step-line"></div>
+                                        </div>
+                                        <div class="step <?= $booking['status'] === 'awaiting_containers' ? 'active' : ($booking['status'] === 'pending' ? 'pending' : 'completed') ?>">
+                                            <div class="step-number">2</div>
+                                            <div class="text-xs">Get Details</div>
+                                            <div class="step-line"></div>
+                                        </div>
+                                        <div class="step <?= $booking['status'] === 'containers_updated' ? 'active' : (in_array($booking['status'], ['pending', 'being_addressed', 'awaiting_containers']) ? 'pending' : 'completed') ?>">
+                                            <div class="step-number">3</div>
+                                            <div class="text-xs">Assign Vehicles</div>
+                                            <div class="step-line"></div>
+                                        </div>
+                                        <div class="step <?= in_array($booking['status'], ['partially_fulfilled', 'pending_vendor_approval', 'confirmed']) ? 'active' : 'pending' ?>">
+                                            <div class="step-number">4</div>
+                                            <div class="text-xs">Complete</div>
                                         </div>
                                     </div>
 
@@ -625,72 +1654,122 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                             </div>
                                         </div>
                                         
-                                        <div>
-                                            <h4 class="font-semibold text-gray-900 mb-3">Location Details</h4>
-                                            <div class="space-y-2">
-                                                <p><span class="text-gray-600">From:</span> <span class="font-medium"><?= htmlspecialchars($booking['from_location_name'] ?? 'Not specified') ?></span></p>
-                                                <p><span class="text-gray-600">To:</span> <span class="font-medium"><?= htmlspecialchars($booking['to_location_name'] ?? 'Not specified') ?></span></p>
-                                            </div>
-                                        </div>
+                                        
                                     </div>
 
                                     <!-- Container Details -->
-                                    <?php if (!empty($booking['containers'])): ?>
-                                        <div class="mb-6">
-                                            <h4 class="font-semibold text-gray-900 mb-3">Container Details</h4>
-                                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                <?php foreach ($booking['containers'] as $container): ?>
-                                                    <div class="bg-gray-50 rounded-lg p-4">
-                                                        <div class="flex items-center gap-2 mb-2">
-                                                            <span class="w-6 h-6 bg-teal-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
-                                                                <?= $container['container_sequence'] ?>
-                                                            </span>
-                                                            <span class="font-medium"><?= htmlspecialchars($container['container_type']) ?></span>
-                                                        </div>
-                                                        <div class="text-sm text-gray-600">
-                                                            <?php if ($container['container_number_1']): ?>
-                                                                <p>№1: <?= htmlspecialchars($container['container_number_1']) ?></p>
-                                                            <?php endif; ?>
-                                                            <?php if ($container['container_number_2']): ?>
-                                                                <p>№2: <?= htmlspecialchars($container['container_number_2']) ?></p>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                        <?php if (isset($container['from_location_name']) || isset($container['to_location_name'])): ?>
-                                                            <div class="text-xs text-blue-600 mt-2 border-t border-gray-200 pt-2">
-                                                                <?php if (isset($container['from_location_name'])): ?>
-                                                                    <p>From: <?= htmlspecialchars($container['from_location_name']) ?></p>
-                                                                <?php endif; ?>
-                                                                <?php if (isset($container['to_location_name'])): ?>
-                                                                    <p>To: <?= htmlspecialchars($container['to_location_name']) ?></p>
-                                                                <?php endif; ?>
-                                                            </div>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        </div>
-                                    <?php endif; ?>
+                                  <div class="booking-card shadow-lg rounded-lg bg-white p-6">
+										<input type="hidden" class="booking-containers-data" data-booking-id="<?= $booking['id'] ?>" value="<?= htmlspecialchars($booking['containers_json']) ?>">
+										
+										<div class="mb-6">
+											<h4 class="font-semibold text-gray-900 mb-3">Container Details (Filled: <?= $booking['filled_containers'] ?>/<?= $booking['no_of_containers'] ?? 0 ?> | Assigned: <?= $booking['assigned_containers'] ?>/<?= $booking['no_of_containers'] ?? 0 ?>)</h4>
+											<?php if (!empty($booking['containers'])): ?>
+												<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+													<?php foreach ($booking['containers'] as $container): ?>
+														<div class="container-card border rounded-lg p-4 <?= $container['assigned_vehicle_id'] ? 'border-blue-300 bg-blue-50' : '' ?>">
+													<div class="flex items-center gap-2 mb-3">
+														<span class="w-8 h-8 bg-teal-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
+															<?= $container['container_sequence'] ?>
+														</span>
+														<span class="font-medium"><?= $container['container_type'] ?: 'Not specified' ?></span>
+													</div>
+													<div class="text-sm text-gray-600 space-y-1">
+														<p>Number 1: <?= htmlspecialchars($container['container_number_1'] ?: 'Pending') ?></p>
+														<?php if ($container['container_number_2']): ?>
+															<p>Number 2: <?= htmlspecialchars($container['container_number_2']) ?></p>
+														<?php endif; ?>
+														<p>From: <?= htmlspecialchars($container['from_location_name'] ?: 'Pending') ?></p>
+														<p>To: <?= htmlspecialchars($container['to_location_name'] ?: 'Pending') ?></p>
+														<p>Assignment: <?= $container['assignment_status'] ?: 'Pending' ?></p>
+														<?php if ($container['assigned_vehicle_id']): ?>
+															<p>Vehicle: <?= htmlspecialchars($container['owned_vehicle_number'] ?: $container['vendor_vehicle_number']) ?> (<?= $container['vehicle_type'] ?>)</p>
+															<p>Trip: <?= htmlspecialchars($container['trip_reference'] ?: 'Not created') ?></p>
+														<?php endif; ?>
+													</div>
+												</div>
+											<?php endforeach; ?>
+										</div>
+									<?php else: ?>
+										<div class="text-center text-gray-500 py-8">
+                <i class="fas fa-cube text-3xl mb-3"></i>
+                <p>Awaiting container details (0/<?= $booking['no_of_containers'] ?? 0 ?> filled)</p>
+            </div>
+        <?php endif; ?>
+								</div>
 
                                     <!-- Action Buttons -->
                                     <div class="flex flex-wrap gap-3 pt-4 border-t border-gray-200">
-                                        <button onclick="openOwnedVehicleModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>')" 
-                                                class="btn-enhanced btn-primary">
-                                            <i class="fas fa-truck mr-2"></i>
-                                            Assign Owned Vehicle
-                                        </button>
-                                        
-                                        <button onclick="openVendorVehicleModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>')" 
-                                                class="btn-enhanced btn-secondary">
-                                            <i class="fas fa-handshake mr-2"></i>
-                                            Assign Vendor Vehicle
-                                        </button>
-                                        
-                                        <button onclick="openRejectModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>')" 
-                                                class="btn-enhanced btn-danger">
-                                            <i class="fas fa-times mr-2"></i>
-                                            Reject Booking
-                                        </button>
-                                    </div>
+								<?php 
+								$status_info = getBookingStatusInfo($booking);
+								?>
+    
+							<!-- Progress Information -->
+									<?php if ($status_info['progress_message']): ?>
+										<div class="w-full bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+											<div class="flex items-center justify-between">
+												<div class="flex items-center">
+													<i class="fas fa-info-circle text-blue-600 mr-2"></i>
+													<span class="text-sm text-blue-800"><?= $status_info['progress_message'] ?></span>
+												</div>
+												<div class="text-xs text-blue-600">
+													Next: <?= $status_info['next_action'] ?>
+												</div>
+											</div>
+										</div>
+									<?php endif; ?>
+
+									<!-- Action Buttons -->
+									<?php if ($status_info['can_acknowledge']): ?>
+										<button onclick="acknowledgeBooking(<?= $booking['id'] ?>)" class="btn-enhanced btn-primary">
+											<i class="fas fa-hand-paper mr-2"></i>
+											Start Working
+										</button>
+									<?php endif; ?>
+
+									<?php if ($status_info['can_contact_l1']): ?>
+										<button onclick="openL1ContactModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>')" class="btn-enhanced btn-warning">
+											<i class="fas fa-phone mr-2"></i>
+											Contact L1 for Details
+										</button>
+									<?php endif; ?>
+
+									<?php if ($status_info['can_update_containers']): ?>
+										<button onclick="openContainerUpdateModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>')" class="btn-enhanced btn-success">
+											<i class="fas fa-upload mr-2"></i>
+											<?= $booking['status'] === 'partially_fulfilled' ? 'Update Remaining Containers' : 'Update Container Details' ?>
+										</button>
+									<?php endif; ?>
+
+									<?php if ($status_info['can_assign_vehicles']): ?>
+										<button onclick="openVehicleAssignmentModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>')" class="btn-enhanced btn-primary">
+											<i class="fas fa-truck mr-2"></i>
+											<?= $booking['status'] === 'partially_fulfilled' ? 'Assign Remaining Vehicles' : 'Assign Vehicles' ?>
+										</button>
+									<?php endif; ?>
+
+									<?php if ($status_info['is_complete']): ?>
+										<div class="w-full bg-green-50 border border-green-200 rounded-lg p-3">
+											<div class="flex items-center">
+												<i class="fas fa-check-circle text-green-600 mr-2"></i>
+												<span class="text-sm text-green-800"><?= $status_info['progress_message'] ?></span>
+											</div>
+										</div>
+									<?php endif; ?>
+
+									<?php if ($booking['status'] === 'pending_vendor_approval'): ?>
+										<div class="w-full bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+											<div class="flex items-center">
+												<i class="fas fa-clock text-yellow-600 mr-2"></i>
+												<span class="text-sm text-yellow-800">Waiting for manager approval on vendor rates</span>
+											</div>
+										</div>
+									<?php endif; ?>
+
+									<button onclick="viewBookingDetails(<?= $booking['id'] ?>)" class="btn-enhanced btn-secondary">
+										<i class="fas fa-eye mr-2"></i>
+										View Details
+									</button>
+								</div>
                                 </div>
                             <?php endforeach; ?>
                         </div>
@@ -700,52 +1779,55 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
-    <!-- Owned Vehicle Assignment Modal -->
-    <div id="ownedVehicleModal" class="modal">
+    <!-- L1 Contact Modal -->
+    <div id="l1ContactModal" class="modal">
         <div class="modal-content">
             <div class="p-6">
                 <div class="flex justify-between items-center mb-6">
-                    <h3 class="text-xl font-bold text-gray-900">Assign Owned Vehicle</h3>
-                    <button onclick="closeModal('ownedVehicleModal')" class="text-gray-400 hover:text-gray-600">
+                    <h3 class="text-xl font-bold text-gray-900">Contact L1 Supervisor</h3>
+                    <button onclick="closeModal('l1ContactModal')" class="text-gray-400 hover:text-gray-600">
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
                 
-                <form method="POST" class="space-y-4">
-                    <input type="hidden" name="action" value="assign_owned_vehicle">
-                    <input type="hidden" name="booking_id" id="owned_booking_id">
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-truck text-teal-600 mr-2"></i>Select Vehicle *
-                        </label>
-                        <select name="vehicle_id" class="input-enhanced" required>
-                            <option value="">Choose available vehicle...</option>
-                            <?php foreach ($owned_vehicles as $vehicle): ?>
-                                <option value="<?= $vehicle['id'] ?>">
-                                    <?= htmlspecialchars($vehicle['vehicle_number']) ?> - 
-                                    <?= htmlspecialchars($vehicle['make_model']) ?>
-                                    <?php if ($vehicle['driver_name']): ?>
-                                        (Driver: <?= htmlspecialchars($vehicle['driver_name']) ?>)
-                                    <?php endif; ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
+                <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div class="flex items-center">
+                        <i class="fas fa-info-circle text-blue-600 mr-2"></i>
+                        <span class="text-sm text-blue-800">Send booking details to L1 supervisor to get container images via WhatsApp</span>
                     </div>
+                </div>
+                
+                <form method="POST" class="space-y-4">
+                    <input type="hidden" name="action" value="contact_l1">
+                    <input type="hidden" name="booking_id" id="l1_booking_id">
                     
                     <div>
+					<label class="block text-sm font-medium text-gray-700 mb-2">
+						<i class="fas fa-user text-teal-600 mr-2"></i>L1 Supervisor *
+					</label>
+					<div class="relative">
+						<input type="text" class="input-enhanced l1-search" 
+							   placeholder="Search L1 supervisor by name or mobile..." 
+							   onkeyup="searchL1Supervisors(this, 'l1_contact')">
+						<input type="hidden" name="l1_contact" id="l1_contact_hidden">
+						<div class="search-dropdown"></div>
+					</div>
+				</div>
+									
+                    <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-sticky-note text-teal-600 mr-2"></i>Driver Notes
+                            <i class="fas fa-comment text-teal-600 mr-2"></i>Message to Send
                         </label>
-                        <textarea name="driver_notes" rows="3" class="input-enhanced" 
-                                  placeholder="Any special instructions or notes for the driver..."></textarea>
+                        <textarea name="whatsapp_message" rows="4" class="input-enhanced" 
+                                  placeholder="Hi, please send container images for booking..." readonly></textarea>
+                        <p class="text-xs text-gray-500 mt-1">Message will be auto-generated based on booking details</p>
                     </div>
                     
                     <div class="flex gap-3 pt-4">
                         <button type="submit" class="btn-enhanced btn-primary flex-1">
-                            <i class="fas fa-check mr-2"></i>Assign Vehicle
+                            <i class="fas fa-paper-plane mr-2"></i>Send WhatsApp Message
                         </button>
-                        <button type="button" onclick="closeModal('ownedVehicleModal')" class="btn-enhanced btn-secondary">
+                        <button type="button" onclick="closeModal('l1ContactModal')" class="btn-enhanced btn-secondary">
                             <i class="fas fa-times mr-2"></i>Cancel
                         </button>
                     </div>
@@ -754,113 +1836,64 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
-    <!-- Vendor Vehicle Assignment Modal -->
-    <div id="vendorVehicleModal" class="modal">
+    <!-- Container Update Modal -->
+				<div id="container-update-modal" class="modal hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+					<div class="modal-content bg-white rounded-lg p-6 max-w-4xl mx-auto mt-10">
+						<div class="flex justify-between items-center border-b pb-3 mb-4">
+							<h2 class="text-xl font-bold">Update Container Details</h2>
+							<button onclick="closeModal('container-update-modal')" class="text-gray-500 hover:text-gray-700">
+								<i class="fas fa-times"></i>
+							</button>
+						</div>
+						<form id="container-update-form" enctype="multipart/form-data">
+							<input type="hidden" name="action" value="update_container_details">
+							<input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+							<input type="hidden" name="booking_id" id="container_booking_id">
+							<input type="hidden" name="total_containers" id="container_total_containers">
+							<div id="container-forms-section"></div>
+							<div class="mt-6 text-right">
+								<button type="button" onclick="submitContainerForm()" class="btn-enhanced btn-success">
+									<i class="fas fa-save mr-2"></i> Save Changes
+								</button>
+								<button type="button" onclick="closeModal('container-update-modal')" class="btn-enhanced btn-secondary ml-3">
+									<i class="fas fa-times mr-2"></i> Cancel
+								</button>
+							</div>
+						</form>
+					</div>
+				</div>
+
+    <!-- Vehicle Assignment Modal -->
+    <div id="vehicleAssignmentModal" class="modal">
         <div class="modal-content">
             <div class="p-6">
                 <div class="flex justify-between items-center mb-6">
-                    <h3 class="text-xl font-bold text-gray-900">Assign Vendor Vehicle</h3>
-                    <button onclick="closeModal('vendorVehicleModal')" class="text-gray-400 hover:text-gray-600">
+                    <h3 class="text-xl font-bold text-gray-900">Assign Vehicles to Containers</h3>
+                    <button onclick="closeModal('vehicleAssignmentModal')" class="text-gray-400 hover:text-gray-600">
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
                 
-                <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                     <div class="flex items-center">
-                        <i class="fas fa-exclamation-triangle text-yellow-600 mr-2"></i>
-                        <span class="text-sm text-yellow-800 font-medium">
-                            Vendor vehicle assignments require manager approval for rates
-                        </span>
+                        <i class="fas fa-info-circle text-green-600 mr-2"></i>
+                        <span class="text-sm text-green-800">Assign vehicles to each container. Owned vehicles complete immediately, vendor vehicles need manager approval.</span>
                     </div>
                 </div>
                 
-                <form method="POST" class="space-y-4">
-                    <input type="hidden" name="action" value="assign_vendor_vehicle">
-                    <input type="hidden" name="booking_id" id="vendor_booking_id">
+                <form method="POST" class="space-y-6">
+                    <input type="hidden" name="action" value="assign_vehicles">
+                    <input type="hidden" name="booking_id" id="vehicle_booking_id">
                     
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-handshake text-teal-600 mr-2"></i>Select Vendor *
-                        </label>
-                        <select name="vendor_id" class="input-enhanced" required>
-                            <option value="">Choose vendor...</option>
-                            <?php foreach ($vendors as $vendor): ?>
-                                <option value="<?= $vendor['id'] ?>">
-                                    <?= htmlspecialchars($vendor['company_name']) ?> (<?= htmlspecialchars($vendor['vendor_code']) ?>) - 
-                                    <?= htmlspecialchars($vendor['contact_person']) ?>
-                                    <?php if ($vendor['total_vehicles']): ?>
-                                        [<?= $vendor['total_vehicles'] ?> vehicles]
-                                    <?php endif; ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
+                    <div id="vehicle-assignment-section">
+                        <!-- Vehicle assignment forms will be dynamically loaded here -->
                     </div>
                     
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-truck text-teal-600 mr-2"></i>Vehicle Details *
-                            </label>
-                            <input type="text" name="vehicle_details" class="input-enhanced" required
-                                   placeholder="e.g., Tata 407, License: MH01AB1234">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-user text-teal-600 mr-2"></i>Driver Name *
-                            </label>
-                            <input type="text" name="driver_name" class="input-enhanced" required
-                                   placeholder="Driver's full name">
-                        </div>
-                    </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-phone text-teal-600 mr-2"></i>Driver Contact *
-                        </label>
-                        <input type="tel" name="driver_contact" class="input-enhanced" required
-                               placeholder="Driver's mobile number">
-                    </div>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-rupee-sign text-teal-600 mr-2"></i>Rate per Day *
-                            </label>
-                            <input type="number" name="rate_per_day" id="rate_per_day" class="input-enhanced" required
-                                   min="0" step="0.01" placeholder="0.00" onchange="calculateTotal()">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-calendar text-teal-600 mr-2"></i>Estimated Days *
-                            </label>
-                            <input type="number" name="estimated_days" id="estimated_days" class="input-enhanced" required
-                                   min="1" placeholder="1" onchange="calculateTotal()">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-calculator text-teal-600 mr-2"></i>Total Cost
-                            </label>
-                            <input type="text" id="total_cost_display" class="input-enhanced bg-gray-100" readonly
-                                   placeholder="Auto-calculated">
-                        </div>
-                    </div>
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-sticky-note text-teal-600 mr-2"></i>Additional Notes
-                        </label>
-                        <textarea name="vendor_notes" rows="3" class="input-enhanced" 
-                                  placeholder="Any special requirements, terms, or conditions..."></textarea>
-                    </div>
-                    
-                    <div class="flex gap-3 pt-4">
+                    <div class="flex gap-3 pt-4 border-t border-gray-200">
                         <button type="submit" class="btn-enhanced btn-primary flex-1">
-                            <i class="fas fa-check mr-2"></i>Submit for Approval
+                            <i class="fas fa-truck mr-2"></i>Assign Vehicles
                         </button>
-                        <button type="button" onclick="closeModal('vendorVehicleModal')" class="btn-enhanced btn-secondary">
+                        <button type="button" onclick="closeModal('vehicleAssignmentModal')" class="btn-enhanced btn-secondary">
                             <i class="fas fa-times mr-2"></i>Cancel
                         </button>
                     </div>
@@ -869,488 +1902,975 @@ $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
-    <!-- Rejection Modal -->
-    <div id="rejectModal" class="modal">
+    <!-- Booking Details Modal -->
+    <div id="bookingDetailsModal" class="modal">
         <div class="modal-content">
             <div class="p-6">
                 <div class="flex justify-between items-center mb-6">
-                    <h3 class="text-xl font-bold text-gray-900">Reject Booking</h3>
-                    <button onclick="closeModal('rejectModal')" class="text-gray-400 hover:text-gray-600">
+                    <h3 class="text-xl font-bold text-gray-900">Booking Details</h3>
+                    <button onclick="closeModal('bookingDetailsModal')" class="text-gray-400 hover:text-gray-600">
                         <i class="fas fa-times text-xl"></i>
                     </button>
                 </div>
                 
-                <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                    <div class="flex items-center">
-                        <i class="fas fa-exclamation-circle text-red-600 mr-2"></i>
-                        <span class="text-sm text-red-800 font-medium">
-                            This action will permanently reject the booking request
-                        </span>
-                    </div>
+                <div id="booking-details-content">
+                    <!-- Booking details will be loaded here -->
                 </div>
                 
-                <form method="POST" class="space-y-4">
-                    <input type="hidden" name="action" value="reject_booking">
-                    <input type="hidden" name="booking_id" id="reject_booking_id">
-                    
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-comment text-teal-600 mr-2"></i>Rejection Reason *
-                        </label>
-                        <textarea name="rejection_reason" rows="4" class="input-enhanced" required
-                                  placeholder="Please provide a clear reason for rejecting this booking..."></textarea>
-                        <p class="text-xs text-gray-500 mt-1">This reason will be shared with the booking creator</p>
-                    </div>
-                    
-                    <div class="flex gap-3 pt-4">
-                        <button type="submit" class="btn-enhanced btn-danger flex-1">
-                            <i class="fas fa-times mr-2"></i>Reject Booking
-                        </button>
-                        <button type="button" onclick="closeModal('rejectModal')" class="btn-enhanced btn-secondary">
-                            <i class="fas fa-arrow-left mr-2"></i>Cancel
-                        </button>
-                    </div>
-                </form>
+                <div class="flex gap-3 pt-4 border-t border-gray-200">
+                    <button type="button" onclick="closeModal('bookingDetailsModal')" class="btn-enhanced btn-secondary">
+                        <i class="fas fa-times mr-2"></i>Close
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-	<script>
-    // Modal functions
-    function openOwnedVehicleModal(bookingId, bookingRef) {
-        document.getElementById('owned_booking_id').value = bookingId;
-        document.getElementById('ownedVehicleModal').style.display = 'block';
-        document.body.style.overflow = 'hidden';
+
+
+<script>
+    // Initialize search timeouts object to prevent undefined errors
+    const searchTimeouts = {
+        locations: null,
+        vehicles: null,
+        vendors: null,
+        l1_supervisors: null
+    };
+
+    // FIXED: Modal control functions - using style.display instead of classList
+    function openModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.style.display = 'block';
+            modal.classList.remove('hidden');
+        }
     }
-    
-    function openVendorVehicleModal(bookingId, bookingRef) {
-        document.getElementById('vendor_booking_id').value = bookingId;
-        document.getElementById('vendorVehicleModal').style.display = 'block';
-        document.body.style.overflow = 'hidden';
-    }
-    
-    function openRejectModal(bookingId, bookingRef) {
-        document.getElementById('reject_booking_id').value = bookingId;
-        document.getElementById('rejectModal').style.display = 'block';
-        document.body.style.overflow = 'hidden';
-    }
-    
+
     function closeModal(modalId) {
-        document.getElementById(modalId).style.display = 'none';
-        document.body.style.overflow = 'auto';
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.style.display = 'none';
+            modal.classList.add('hidden');
+        }
+    }
+
+    // FIXED: Added missing acknowledge booking function
+    function acknowledgeBooking(bookingId) {
+        if (!confirm('Are you sure you want to start working on this booking?')) {
+            return;
+        }
         
-        // Reset forms
-        const form = document.querySelector('#' + modalId + ' form');
-        if (form) {
-            form.reset();
-            // Clear calculated fields
-            if (modalId === 'vendorVehicleModal') {
-                document.getElementById('total_cost_display').value = '';
+        showLoading('Acknowledging booking...');
+        
+        const formData = new FormData();
+        formData.append('booking_id', bookingId);
+        
+        fetch('?ajax=acknowledge_booking', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                showNotification(data.message, 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showNotification(data.message || 'Error acknowledging booking', 'error');
             }
+        })
+        .catch(error => {
+            hideLoading();
+            console.error('Error:', error);
+            showNotification('Error acknowledging booking', 'error');
+        });
+    }
+
+    // FIXED: Added missing L1 contact modal function
+    function openL1ContactModal(bookingId, bookingRef) {
+        document.getElementById('l1_booking_id').value = bookingId;
+        
+        // Auto-generate WhatsApp message
+        const messageTextarea = document.querySelector('textarea[name="whatsapp_message"]');
+        if (messageTextarea) {
+            const message = `Hi, please send container images and details for Booking #${bookingRef}. 
+
+Please provide:
+- Container numbers
+- Container types (20ft/40ft)
+- Pickup and delivery locations
+- Clear images of each container
+
+Thank you!`;
+            messageTextarea.value = message;
+        }
+        
+        openModal('l1ContactModal');
+    }
+
+    // FIXED: Container update modal function
+    function openContainerUpdateModal(bookingId, bookingRef) {
+        const modal = document.getElementById('container-update-modal');
+        if (!modal) {
+            console.error('Container update modal not found');
+            return;
+        }
+
+        document.getElementById('container_booking_id').value = bookingId;
+        const bookingCard = document.querySelector(`[data-booking-id="${bookingId}"]`);
+        const containersDataInput = bookingCard ? bookingCard.querySelector('.booking-containers-data') : null;
+
+        if (containersDataInput) {
+            let containersData;
+            try {
+                containersData = JSON.parse(containersDataInput.value);
+                document.getElementById('container_total_containers').value = containersData.total_containers || 0;
+            } catch (e) {
+                console.error('Error parsing container data:', e);
+                document.getElementById('container_total_containers').value = 0;
+            }
+        }
+
+        loadContainerForms(bookingId);
+        openModal('container-update-modal');
+    }
+
+    // Load container forms dynamically
+function loadContainerForms(bookingId) {
+    const formsSection = document.getElementById('container-forms-section');
+    if (!formsSection) return;
+
+    const bookingCard = document.querySelector(`[data-booking-id="${bookingId}"]`);
+    const containersDataInput = bookingCard ? bookingCard.querySelector('.booking-containers-data') : null;
+    let containersData = { total_containers: 0, existing_containers: [] };
+
+    if (containersDataInput) {
+        try {
+            containersData = JSON.parse(containersDataInput.value) || containersData;
+        } catch (e) {
+            console.error('Error parsing container data:', e);
+        }
+    }
+
+    const totalContainers = containersData.total_containers || 0;
+    const existingContainers = containersData.existing_containers || [];
+    let formsHTML = '';
+
+    // Load existing containers with proper location value handling
+    existingContainers.forEach((container, index) => {
+        const key = container.id || `existing_${index}`;
+        const isNumber1Readonly = container.container_number_1 ? 'readonly' : '';
+        
+        formsHTML += `
+            <div class="container-form bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="w-8 h-8 bg-teal-600 text-white rounded-full flex items-center justify-center text-sm font-bold">${container.container_sequence}</span>
+                    <h4 class="font-semibold text-gray-900">Container ${container.container_sequence}</h4>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Type</label>
+                        <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')">
+                            <option value="">Select type</option>
+                            <option value="20ft" ${container.container_type === '20ft' ? 'selected' : ''}>20ft</option>
+                            <option value="40ft" ${container.container_type === '40ft' ? 'selected' : ''}>40ft</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 1</label>
+                        <input type="text" name="containers[${key}][number1]" class="input-enhanced" placeholder="Enter container number" value="${container.container_number_1 || ''}" ${isNumber1Readonly}>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 container-number2-section" style="display: ${container.container_type === '20ft' ? 'block' : 'none'};">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 2 (optional for 20ft)</label>
+                        <input type="text" name="containers[${key}][number2]" class="input-enhanced" placeholder="Enter second container number" value="${container.container_number_2 || ''}" ${isNumber1Readonly}>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">From Location</label>
+                        <div class="relative">
+                            <input type="text" class="input-enhanced location-search" placeholder="Search from location..." onkeyup="searchLocations(this, 'containers[${key}][from_location]')" value="${container.from_location_name || ''}">
+                            <input type="hidden" name="containers[${key}][from_location]" value="${container.from_location_value || ''}">
+                            <div class="search-dropdown"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">To Location</label>
+                        <div class="relative">
+                            <input type="text" class="input-enhanced location-search" placeholder="Search to location..." onkeyup="searchLocations(this, 'containers[${key}][to_location]')" value="${container.to_location_name || ''}">
+                            <input type="hidden" name="containers[${key}][to_location]" value="${container.to_location_value || ''}">
+                            <div class="search-dropdown"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Image 1</label>
+                        <div class="file-upload-area" onclick="triggerFileUpload('container_${key}_image1')">
+                            <input type="file" id="container_${key}_image1" name="container_images[container_${key}_image1]" accept="image/*" style="display: none;" onchange="handleFileSelect(this)">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                            <p class="text-sm text-gray-600">Click to upload or drag image here</p>
+                            ${container.container_image_1 ? '<p class="text-xs text-green-600">Existing image uploaded</p>' : ''}
+                            <div class="file-preview mt-2" style="display: none;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Image 2 (optional)</label>
+                        <div class="file-upload-area" onclick="triggerFileUpload('container_${key}_image2')">
+                            <input type="file" id="container_${key}_image2" name="container_images[container_${key}_image2]" accept="image/*" style="display: none;" onchange="handleFileSelect(this)">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                            <p class="text-sm text-gray-600">Click to upload or drag image here</p>
+                            ${container.container_image_2 ? '<p class="text-xs text-green-600">Existing image uploaded</p>' : ''}
+                            <div class="file-preview mt-2" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+                <input type="hidden" name="containers[${key}][id]" value="${container.id || ''}">
+            </div>
+        `;
+    });
+
+    // Add forms for remaining new containers (similar structure but without existing data)
+    const remaining = totalContainers - existingContainers.length;
+    for (let i = 0; i < remaining; i++) {
+        const key = `new_${i}`;
+        const seq = existingContainers.length + i + 1;
+        formsHTML += `
+            <div class="container-form bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4">
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="w-8 h-8 bg-teal-600 text-white rounded-full flex items-center justify-center text-sm font-bold">${seq}</span>
+                    <h4 class="font-semibold text-gray-900">Container ${seq} (New)</h4>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Type</label>
+                        <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')">
+                            <option value="">Select type</option>
+                            <option value="20ft">20ft</option>
+                            <option value="40ft">40ft</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 1</label>
+                        <input type="text" name="containers[${key}][number1]" class="input-enhanced" placeholder="Enter container number">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 container-number2-section" style="display: none;">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 2 (optional for 20ft)</label>
+                        <input type="text" name="containers[${key}][number2]" class="input-enhanced" placeholder="Enter second container number">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">From Location</label>
+                        <div class="relative">
+                            <input type="text" class="input-enhanced location-search" placeholder="Search from location..." onkeyup="searchLocations(this, 'containers[${key}][from_location]')">
+                            <input type="hidden" name="containers[${key}][from_location]">
+                            <div class="search-dropdown"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">To Location</label>
+                        <div class="relative">
+                            <input type="text" class="input-enhanced location-search" placeholder="Search to location..." onkeyup="searchLocations(this, 'containers[${key}][to_location]')">
+                            <input type="hidden" name="containers[${key}][to_location]">
+                            <div class="search-dropdown"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Image 1</label>
+                        <div class="file-upload-area" onclick="triggerFileUpload('container_${key}_image1')">
+                            <input type="file" id="container_${key}_image1" name="container_images[container_${key}_image1]" accept="image/*" style="display: none;" onchange="handleFileSelect(this)">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                            <p class="text-sm text-gray-600">Click to upload or drag image here</p>
+                            <div class="file-preview mt-2" style="display: none;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Image 2 (optional)</label>
+                        <div class="file-upload-area" onclick="triggerFileUpload('container_${key}_image2')">
+                            <input type="file" id="container_${key}_image2" name="container_images[container_${key}_image2]" accept="image/*" style="display: none;" onchange="handleFileSelect(this)">
+                            <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-2"></i>
+                            <p class="text-sm text-gray-600">Click to upload or drag image here</p>
+                            <div class="file-preview mt-2" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    formsSection.innerHTML = formsHTML;
+    setupSearchInputs();
+}
+    // Toggle container number 2 based on type
+    function toggleContainerNumber2(selectElement, key) {
+        const section = selectElement.closest('.container-form').querySelector('.container-number2-section');
+        const number2Input = section.querySelector(`input[name="containers[${key}][number2]"]`);
+        if (selectElement.value === '20ft') {
+            section.style.display = 'block';
+            number2Input.disabled = false;
+        } else {
+            section.style.display = 'none';
+            number2Input.disabled = true;
+            number2Input.value = '';
+        }
+    }
+
+    // FIXED: Vehicle assignment modal function
+    function openVehicleAssignmentModal(bookingId, bookingRef) {
+        document.getElementById('vehicle_booking_id').value = bookingId;
+        loadVehicleAssignmentForms(bookingId);
+        openModal('vehicleAssignmentModal');
+    }
+
+    // Load vehicle assignment forms
+function loadVehicleAssignmentForms(bookingId) {
+    const assignmentSection = document.getElementById('vehicle-assignment-section');
+    if (!assignmentSection) return;
+
+    const bookingCard = document.querySelector(`[data-booking-id="${bookingId}"]`);
+    const containersDataInput = bookingCard ? bookingCard.querySelector('.booking-containers-data') : null;
+    let containersData = { existing_containers: [] };
+
+    if (containersDataInput) {
+        try {
+            containersData = JSON.parse(containersDataInput.value) || containersData;
+        } catch (e) {
+            console.error('Error parsing container data:', e);
+        }
+    }
+
+    const containers = containersData.existing_containers || [];
+    let formsHTML = '';
+
+    containers.forEach((container, index) => {
+        if (container.container_number_1) { // Only show containers with details
+            formsHTML += `
+                <div class="assignment-form bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center gap-2">
+                            <span class="w-8 h-8 bg-teal-600 text-white rounded-full flex items-center justify-center text-sm font-bold">${container.container_sequence}</span>
+                            <h4 class="font-semibold text-gray-900">Container ${container.container_sequence}</h4>
+                            <span class="text-sm text-gray-600">(${container.container_type || 'Unknown'} - ${container.container_number_1})</span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 gap-4">
+                        <!-- Vehicle Type Selection -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Vehicle Type</label>
+                            <select name="assignments[${container.id}][vehicle_type]" class="input-enhanced" onchange="handleVehicleTypeChange(this, ${container.id})">
+                                <option value="">Select type...</option>
+                                <option value="owned">Owned Vehicle</option>
+                                <option value="vendor">Vendor Vehicle</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Owned Vehicle Section -->
+                        <div id="owned-section-${container.id}" class="owned-vehicle-section" style="display: none;">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Search Owned Vehicle</label>
+                                    <div class="relative">
+                                        <input type="text" class="input-enhanced vehicle-search" placeholder="Search owned vehicle..." onkeyup="searchVehicles(this, 'assignments[${container.id}][vehicle_id]')">
+                                        <input type="hidden" name="assignments[${container.id}][vehicle_id]">
+                                        <div class="search-dropdown"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Vendor Vehicle Section -->
+                        <div id="vendor-section-${container.id}" class="vendor-vehicle-section" style="display: none;">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Search Vendor *</label>
+                                    <div class="relative">
+                                        <input type="text" class="input-enhanced vendor-search" placeholder="Search vendor company..." onkeyup="searchVendors(this, 'assignments[${container.id}][vendor_id]')">
+                                        <input type="hidden" name="assignments[${container.id}][vendor_id]">
+                                        <div class="search-dropdown"></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Vehicle Number *</label>
+                                    <div class="relative">
+                                        <input type="text" class="input-enhanced vehicle-number-input" name="assignments[${container.id}][vehicle_number]" placeholder="Enter or search vehicle number..." onkeyup="searchUnlinkedVehicles(this)">
+                                        <div class="search-dropdown"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Daily Rate (USD) *</label>
+                                    <input type="number" name="assignments[${container.id}][vendor_rate]" class="input-enhanced" placeholder="0.00" step="0.01" min="0" required>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3 text-xs text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i> 
+                        <span id="help-text-${container.id}">Please select a vehicle type to continue.</span>
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    if (formsHTML === '') {
+        formsHTML = '<div class="text-center text-gray-500 py-8">No containers available for vehicle assignment. Please update container details first.</div>';
+    }
+
+    assignmentSection.innerHTML = formsHTML;
+    setupSearchInputs();
+}
+
+    // Toggle vendor rate field
+    function toggleVendorRate(selectElement, index) {
+        const rateSection = selectElement.closest('.assignment-form').querySelector('.vendor-rate-section');
+        if (selectElement.value === 'vendor') {
+            rateSection.style.display = 'block';
+            rateSection.querySelector('input').required = true;
+        } else {
+            rateSection.style.display = 'none';
+            rateSection.querySelector('input').required = false;
+        }
+    }
+
+    // FIXED: Search functions with proper error handling
+    function searchLocations(input, hiddenFieldName) {
+        const query = input.value.trim();
+        if (query.length < 2) {
+            hideSearchDropdown(input);
+            return;
+        }
+        
+        clearTimeout(searchTimeouts.locations);
+        
+        searchTimeouts.locations = setTimeout(() => {
+            fetch(`?ajax=search_locations&query=${encodeURIComponent(query)}`)
+                .then(response => response.json())
+                .then(data => {
+                    showSearchResults(input, data, hiddenFieldName, 'location');
+                })
+                .catch(error => {
+                    console.error('Search error:', error);
+                    showSearchResults(input, [], hiddenFieldName, 'location');
+                });
+        }, 300);
+    }
+
+    function searchVehicles(input, hiddenFieldName) {
+        const query = input.value.trim();
+        if (query.length < 2) {
+            hideSearchDropdown(input);
+            return;
+        }
+        
+        clearTimeout(searchTimeouts.vehicles);
+        
+        searchTimeouts.vehicles = setTimeout(() => {
+            fetch(`?ajax=search_vehicles&query=${encodeURIComponent(query)}`)
+                .then(response => response.json())
+                .then(data => {
+                    showSearchResults(input, data, hiddenFieldName, 'vehicle');
+                })
+                .catch(error => {
+                    console.error('Search error:', error);
+                    showSearchResults(input, [], hiddenFieldName, 'vehicle');
+                });
+        }, 300);
+    }
+
+    function searchVendors(input, hiddenFieldName) {
+        const query = input.value.trim();
+        if (query.length < 2) {
+            hideSearchDropdown(input);
+            return;
+        }
+        
+        clearTimeout(searchTimeouts.vendors);
+        
+        searchTimeouts.vendors = setTimeout(() => {
+            fetch(`?ajax=search_vendors&query=${encodeURIComponent(query)}`)
+                .then(response => response.json())
+                .then(data => {
+                    showSearchResults(input, data, hiddenFieldName, 'vendor');
+                })
+                .catch(error => {
+                    console.error('Search error:', error);
+                    showSearchResults(input, [], hiddenFieldName, 'vendor');
+                });
+        }, 300);
+    }
+
+    // FIXED: L1 supervisor search function with proper endpoint
+    function searchL1Supervisors(input, hiddenFieldName) {
+        const query = input.value.trim();
+        if (query.length < 2) {
+            hideSearchDropdown(input);
+            return;
+        }
+        
+        clearTimeout(searchTimeouts.l1_supervisors);
+        
+        searchTimeouts.l1_supervisors = setTimeout(() => {
+            const searchUrl = window.location.pathname + '?ajax=search_l1_supervisors&query=' + encodeURIComponent(query);
+            
+            fetch(searchUrl)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showSearchResults(input, data, hiddenFieldName, 'l1_supervisor');
+                })
+                .catch(error => {
+                    console.error('Search error:', error);
+                    showSearchResults(input, [], hiddenFieldName, 'l1_supervisor');
+                });
+        }, 300);
+    }
+
+    // Show search results
+function showSearchResults(input, data, hiddenFieldName, type) {
+    const dropdown = input.parentElement.querySelector('.search-dropdown');
+    
+    if (data.error) {
+        dropdown.innerHTML = `<div class="search-dropdown-item text-red-500">Error: ${data.error}</div>`;
+    } else if (data.length === 0) {
+        dropdown.innerHTML = '<div class="search-dropdown-item text-gray-500">No results found</div>';
+    } else {
+        let html = '';
+        data.forEach(item => {
+            let displayText = '';
+            let value = '';
+            
+            switch (type) {
+                case 'location':
+                    displayText = item.display_name; // e.g., "Main Warehouse (LOCATION)" or "Port Yard (YARD)"
+                    value = item.value; // e.g., "location|123" or "yard|456"
+                    break;
+                case 'vehicle':
+                    // Handle both single make_model and separate make/model
+                    let vehicleDetails = item.vehicle_number;
+                    if (item.make && item.model) {
+                        vehicleDetails += ` - ${item.make} ${item.model}`;
+                    } else if (item.make) {
+                        vehicleDetails += ` - ${item.make}`;
+                    }
+                    
+                    if (item.driver_name && item.driver_name !== 'No Driver') {
+                        vehicleDetails += ` (${item.driver_name})`;
+                    }
+                    vehicleDetails += ` [${item.vehicle_type.toUpperCase()}]`;
+                    
+                    if (item.status && item.status !== 'unknown') {
+                        vehicleDetails += ` - ${item.status.toUpperCase()}`;
+                    }
+                    
+                    displayText = vehicleDetails;
+                    value = item.id;
+                    break;
+                case 'vendor':
+                    displayText = `${item.company_name} (${item.vendor_code}) - ${item.contact_person}`;
+                    value = item.id;
+                    break;
+                case 'l1_supervisor':
+                    displayText = `${item.full_name} (${item.phone_number || item.mobile})`;
+                    value = item.phone_number || item.mobile;
+                    break;
+            }
+            
+            html += `<div class="search-dropdown-item" onclick="selectSearchResult('${value}', '${displayText.replace(/'/g, "\\'")}', '${input.id || 'temp_' + Math.random()}', '${hiddenFieldName}')">${displayText}</div>`;
+        });
+        dropdown.innerHTML = html;
+    }
+    
+    dropdown.style.display = 'block';
+}
+
+// Add this debug function to your JavaScript
+function debugContainerSubmission() {
+    const form = document.getElementById('container-update-form');
+    if (!form) {
+        console.log('DEBUG: Form not found');
+        return;
+    }
+    
+    const formData = new FormData(form);
+    
+    console.log('=== CONTAINER FORM DEBUG ===');
+    console.log('Booking ID:', formData.get('booking_id'));
+    console.log('Total Containers:', formData.get('total_containers'));
+    
+    // Log all container data
+    for (let [key, value] of formData.entries()) {
+        if (key.startsWith('containers[')) {
+            console.log(`${key}: ${value}`);
         }
     }
     
-    // Calculate total cost for vendor vehicle
-    function calculateTotal() {
-        const rate = parseFloat(document.getElementById('rate_per_day').value) || 0;
-        const days = parseInt(document.getElementById('estimated_days').value) || 0;
-        const total = rate * days;
+    // Count filled containers
+    let filledContainers = 0;
+    const containerKeys = new Set();
+    
+    for (let [key, value] of formData.entries()) {
+        if (key.includes('[number1]') && value.trim() !== '') {
+            filledContainers++;
+            console.log(`Filled container found: ${key} = ${value}`);
+        }
         
-        document.getElementById('total_cost_display').value = total > 0 ? 
-            '₹' + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '';
+        // Extract container keys
+        const match = key.match(/containers\[([^\]]+)\]/);
+        if (match) {
+            containerKeys.add(match[1]);
+        }
     }
     
-    // Close modal when clicking outside
-    window.onclick = function(event) {
-        const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
-        modals.forEach(modalId => {
-            const modal = document.getElementById(modalId);
-            if (event.target === modal) {
-                closeModal(modalId);
+    console.log('Total container keys found:', containerKeys.size);
+    console.log('Container keys:', Array.from(containerKeys));
+    console.log('Filled containers count:', filledContainers);
+    console.log('Expected total:', formData.get('total_containers'));
+    console.log('=== END DEBUG ===');
+}
+
+// Modified submitContainerForm with debugging
+function submitContainerForm() {
+    const form = document.getElementById('container-update-form');
+    if (!form) {
+        showNotification('Form not found', 'error');
+        return;
+    }
+    
+    // Run debug before submission
+    debugContainerSubmission();
+    
+    showLoading('Updating container details...');
+    const formData = new FormData(form);
+
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        return response.text(); // Get as text first to see raw response
+    })
+    .then(responseText => {
+        console.log('Raw response:', responseText);
+        
+        // Try to parse as JSON
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (e) {
+            console.error('Response is not valid JSON:', e);
+            throw new Error('Invalid response format');
+        }
+        
+        hideLoading();
+        if (data.success) {
+            showNotification(data.message, 'success');
+            closeModal('container-update-modal');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showNotification(data.error || 'Error updating container details', 'error');
+        }
+    })
+    .catch(error => {
+        hideLoading();
+        console.error('Submission error:', error);
+        showNotification('Error submitting form: ' + error.message, 'error');
+    });
+}
+    // Select search result
+    function selectSearchResult(value, displayText, inputId, hiddenFieldName) {
+        // Find the input either by ID or by searching for inputs that call the search function
+        let input = document.getElementById(inputId);
+        if (!input) {
+            // Fallback: find input by searching for the onkeyup attribute
+            const inputs = document.querySelectorAll('input[type="text"]');
+            for (let inp of inputs) {
+                if (inp.getAttribute('onkeyup') && inp.getAttribute('onkeyup').includes(hiddenFieldName)) {
+                    input = inp;
+                    break;
+                }
             }
-        });
-    }
-    
-    // Auto-refresh page every 30 seconds to check for new requests
-    let autoRefreshInterval;
-    function startAutoRefresh() {
-        autoRefreshInterval = setInterval(function() {
-            // Only refresh if no modals are open
-            const modalsOpen = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal']
-                .some(id => document.getElementById(id).style.display === 'block');
+        }
+        
+        if (input) {
+            const hiddenField = input.parentElement.querySelector(`input[name="${hiddenFieldName}"]`);
             
-            if (!modalsOpen) {
-                // Show subtle notification before refresh
-                showRefreshNotification();
+            if (hiddenField) {
+                input.value = displayText;
+                hiddenField.value = value;
+                hideSearchDropdown(input);
+                
+                // Add visual feedback
+                input.classList.add('border-green-500');
                 setTimeout(() => {
-                    location.reload();
+                    input.classList.remove('border-green-500');
                 }, 2000);
             }
-        }, 30000);
-    }
-    
-    function stopAutoRefresh() {
-        if (autoRefreshInterval) {
-            clearInterval(autoRefreshInterval);
         }
     }
-    
-    function showRefreshNotification() {
-        const notification = document.createElement('div');
-        notification.className = 'fixed top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in';
-        notification.innerHTML = '<i class="fas fa-sync-alt mr-2"></i>Checking for new requests...';
-        document.body.appendChild(notification);
-        
-        setTimeout(() => {
-            notification.remove();
-        }, 3000);
-    }
-    
-    // Keyboard shortcuts
-    document.addEventListener('keydown', function(e) {
-        // Escape key to close modals
-        if (e.key === 'Escape') {
-            const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
-            modals.forEach(modalId => {
-                if (document.getElementById(modalId).style.display === 'block') {
-                    closeModal(modalId);
-                }
-            });
+
+    // Hide search dropdown
+    function hideSearchDropdown(input) {
+        const dropdown = input.parentElement.querySelector('.search-dropdown');
+        if (dropdown) {
+            dropdown.style.display = 'none';
         }
-        
-        // Ctrl+R to refresh (stop auto-refresh temporarily)
-        if (e.ctrlKey && e.key === 'r') {
-            stopAutoRefresh();
-            setTimeout(startAutoRefresh, 60000); // Restart after 1 minute
-        }
-    });
-    
-    // Form validation and enhancement
-    document.addEventListener('DOMContentLoaded', function() {
-        // Start auto-refresh
-        startAutoRefresh();
-        
-        // Validate phone numbers
-        const phoneInputs = document.querySelectorAll('input[type="tel"]');
-        phoneInputs.forEach(input => {
-            input.addEventListener('input', function() {
-                // Allow only numbers, +, -, and spaces
-                this.value = this.value.replace(/[^0-9+\-\s]/g, '');
-                
-                // Basic validation feedback
-                if (this.value.length >= 10) {
-                    this.classList.add('border-green-500');
-                    this.classList.remove('border-red-500');
-                } else if (this.value.length > 0) {
-                    this.classList.add('border-red-500');
-                    this.classList.remove('border-green-500');
-                } else {
-                    this.classList.remove('border-green-500', 'border-red-500');
-                }
-            });
-        });
-        
-        // Validate numeric inputs
-        const numericInputs = document.querySelectorAll('input[type="number"]');
-        numericInputs.forEach(input => {
-            input.addEventListener('input', function() {
-                if (this.value < 0) this.value = 0;
-                
-                // Add visual feedback for rate validation
-                if (this.name === 'rate_per_day' && this.value > 0) {
-                    this.classList.add('border-green-500');
-                    this.classList.remove('border-red-500');
-                } else if (this.name === 'rate_per_day' && this.value <= 0 && this.value !== '') {
-                    this.classList.add('border-red-500');
-                    this.classList.remove('border-green-500');
-                }
-            });
-        });
-        
-        // Enhanced form submission with loading states
-        const forms = document.querySelectorAll('form');
-        forms.forEach(form => {
-            form.addEventListener('submit', function(e) {
-                const submitBtn = this.querySelector('button[type="submit"]');
-                if (submitBtn) {
-                    const originalText = submitBtn.innerHTML;
-                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
-                    submitBtn.disabled = true;
-                    
-                    // Re-enable button after 5 seconds as fallback
-                    setTimeout(() => {
-                        submitBtn.innerHTML = originalText;
-                        submitBtn.disabled = false;
-                    }, 5000);
-                }
-            });
-        });
-        
-        // Add confirmation for reject action
-        const rejectForm = document.querySelector('#rejectModal form');
-        if (rejectForm) {
-            rejectForm.addEventListener('submit', function(e) {
-                const reason = this.querySelector('textarea[name="rejection_reason"]').value.trim();
-                if (reason.length < 10) {
-                    e.preventDefault();
-                    alert('Please provide a more detailed rejection reason (at least 10 characters).');
-                    return false;
-                }
-                
-                if (!confirm('Are you sure you want to reject this booking? This action cannot be undone.')) {
-                    e.preventDefault();
-                    return false;
-                }
-            });
-        }
-        
-        // Auto-save vendor form data in localStorage (in case of accidental refresh)
-        const vendorForm = document.querySelector('#vendorVehicleModal form');
-        if (vendorForm) {
-            const formInputs = vendorForm.querySelectorAll('input, select, textarea');
-            
-            formInputs.forEach(input => {
-                // Load saved data
-                const savedValue = localStorage.getItem(`vendor_form_${input.name}`);
-                if (savedValue && input.type !== 'hidden') {
-                    input.value = savedValue;
-                    if (input.name === 'rate_per_day' || input.name === 'estimated_days') {
-                        calculateTotal();
-                    }
-                }
-                
-                // Save data on change
-                input.addEventListener('change', function() {
-                    if (this.type !== 'hidden') {
-                        localStorage.setItem(`vendor_form_${this.name}`, this.value);
-                    }
-                });
-            });
-            
-            // Clear saved data on successful submission
-            vendorForm.addEventListener('submit', function() {
-                formInputs.forEach(input => {
-                    localStorage.removeItem(`vendor_form_${input.name}`);
-                });
-            });
-        }
-        
-        // Add tooltips for better UX
-        addTooltips();
-        
-        // Initialize drag and drop for file uploads (if needed in future)
-        initializeDragDrop();
-        
-        // Add keyboard navigation for modals
-        addModalKeyboardNavigation();
-    });
-    
-    // Add tooltips function
-    function addTooltips() {
-        const tooltipElements = [
-            { selector: 'input[name="rate_per_day"]', text: 'Enter the daily rate charged by the vendor' },
-            { selector: 'input[name="estimated_days"]', text: 'Estimate how many days the vehicle will be needed' },
-            { selector: 'textarea[name="vendor_notes"]', text: 'Include any special terms, conditions, or requirements' },
-            { selector: 'textarea[name="driver_notes"]', text: 'Special instructions for the driver (route, timings, etc.)' }
-        ];
-        
-        tooltipElements.forEach(item => {
-            const element = document.querySelector(item.selector);
-            if (element) {
-                element.title = item.text;
-                element.addEventListener('mouseenter', showTooltip);
-                element.addEventListener('mouseleave', hideTooltip);
-            }
-        });
     }
-    
-    function showTooltip(e) {
-        // Custom tooltip implementation could go here
-    }
-    
-    function hideTooltip(e) {
-        // Hide custom tooltip
-    }
-    
-    // Initialize drag and drop (placeholder for future file upload features)
-    function initializeDragDrop() {
-        // Future implementation for document uploads
-    }
-    
-    // Add keyboard navigation for modals
-    function addModalKeyboardNavigation() {
-        const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
-        
-        modals.forEach(modalId => {
-            const modal = document.getElementById(modalId);
-            if (modal) {
-                modal.addEventListener('keydown', function(e) {
-                    // Tab navigation within modal
-                    if (e.key === 'Tab') {
-                        const focusableElements = this.querySelectorAll(
-                            'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])'
-                        );
-                        const firstElement = focusableElements[0];
-                        const lastElement = focusableElements[focusableElements.length - 1];
-                        
-                        if (e.shiftKey) {
-                            if (document.activeElement === firstElement) {
-                                e.preventDefault();
-                                lastElement.focus();
-                            }
-                        } else {
-                            if (document.activeElement === lastElement) {
-                                e.preventDefault();
-                                firstElement.focus();
-                            }
-                        }
-                    }
+
+    // Setup search inputs
+    function setupSearchInputs() {
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.relative')) {
+                document.querySelectorAll('.search-dropdown').forEach(dropdown => {
+                    dropdown.style.display = 'none';
                 });
             }
         });
     }
-    
-    // Utility function to format currency
-    function formatCurrency(amount) {
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            minimumFractionDigits: 2
-        }).format(amount);
+
+    // File upload functions
+    function triggerFileUpload(inputId) {
+        const input = document.getElementById(inputId);
+        if (input) {
+            input.click();
+        }
     }
-    
-    // Utility function to show notifications
+
+    function handleFileSelect(input) {
+        const file = input.files[0];
+        if (file) {
+            const preview = input.parentElement.querySelector('.file-preview');
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                preview.innerHTML = `
+                    <img src="${e.target.result}" class="w-20 h-20 object-cover rounded-lg border border-gray-300">
+                    <p class="text-xs text-green-600 mt-1">${file.name}</p>
+                `;
+                preview.style.display = 'block';
+            };
+            
+            reader.readAsDataURL(file);
+            
+            input.parentElement.classList.add('border-green-500', 'bg-green-50');
+        }
+    }
+
+    // Drag and drop functionality
+    function enableDragAndDrop() {
+        document.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            const uploadArea = e.target.closest('.file-upload-area');
+            if (uploadArea) {
+                uploadArea.classList.add('dragover');
+            }
+        });
+        
+        document.addEventListener('dragleave', function(e) {
+            const uploadArea = e.target.closest('.file-upload-area');
+            if (uploadArea) {
+                uploadArea.classList.remove('dragover');
+            }
+        });
+        
+        document.addEventListener('drop', function(e) {
+            e.preventDefault();
+            const uploadArea = e.target.closest('.file-upload-area');
+            if (uploadArea) {
+                uploadArea.classList.remove('dragover');
+                const input = uploadArea.querySelector('input[type="file"]');
+                if (input && e.dataTransfer.files.length > 0) {
+                    input.files = e.dataTransfer.files;
+                    handleFileSelect(input);
+                }
+            }
+        });
+    }
+
+    // View booking details
+    function viewBookingDetails(bookingId) {
+        const content = document.getElementById('booking-details-content');
+        if (content) {
+            content.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-info-circle text-3xl text-gray-400 mb-3"></i>
+                    <p class="text-gray-600">Detailed booking information for ID: ${bookingId}</p>
+                    <p class="text-sm text-gray-500 mt-2">This feature will be implemented to show complete booking history and details.</p>
+                </div>
+            `;
+        }
+        openModal('bookingDetailsModal');
+    }
+
+    // Utility functions
+    function showLoading(message = 'Loading...') {
+        // Remove existing loading overlay
+        const existingLoading = document.getElementById('loading-overlay');
+        if (existingLoading) {
+            existingLoading.remove();
+        }
+        
+        const loading = document.createElement('div');
+        loading.id = 'loading-overlay';
+        loading.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center';
+        loading.innerHTML = `
+            <div class="bg-white rounded-lg p-6 flex items-center space-x-3">
+                <i class="fas fa-spinner fa-spin text-teal-600 text-xl"></i>
+                <span class="text-gray-700">${message}</span>
+            </div>
+        `;
+        document.body.appendChild(loading);
+    }
+
+    function hideLoading() {
+        const loading = document.getElementById('loading-overlay');
+        if (loading) {
+            loading.remove();
+        }
+    }
+
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');
         const bgColor = type === 'success' ? 'bg-green-500' : 
-                        type === 'error' ? 'bg-red-500' : 
-                        type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500';
+                       type === 'error' ? 'bg-red-500' : 
+                       type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500';
         
-        notification.className = `fixed top-4 right-4 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in`;
-        notification.innerHTML = message;
+        notification.className = `fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in`;
+        notification.innerHTML = `
+            <div class="flex items-center">
+                <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'times' : 'info'}-circle mr-2"></i>
+                ${message}
+            </div>
+        `;
+        
         document.body.appendChild(notification);
         
         setTimeout(() => {
             notification.remove();
         }, 5000);
     }
-    
-    // Handle connection status
-    function handleConnectionStatus() {
-        window.addEventListener('online', function() {
-            showNotification('<i class="fas fa-wifi mr-2"></i>Connection restored', 'success');
-            startAutoRefresh();
+
+    function refreshPage() {
+        showLoading('Refreshing...');
+        location.reload();
+    }
+
+    // Initialize event listeners
+    function initializeEventListeners() {
+        // Handle form submissions with loading states
+        document.addEventListener('submit', function(e) {
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            if (submitBtn && !submitBtn.disabled) {
+                const originalText = submitBtn.innerHTML;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+                submitBtn.disabled = true;
+                
+                // Reset button after 10 seconds (fallback)
+                setTimeout(() => {
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                }, 10000);
+            }
         });
-        
-        window.addEventListener('offline', function() {
-            showNotification('<i class="fas fa-wifi-slash mr-2"></i>Connection lost - Working offline', 'warning');
-            stopAutoRefresh();
+
+        // Handle modal close on outside click
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal')) {
+                const modalId = e.target.id;
+                closeModal(modalId);
+            }
+        });
+
+        // Handle escape key to close modals
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const openModals = document.querySelectorAll('.modal[style*="block"]');
+                openModals.forEach(modal => {
+                    closeModal(modal.id);
+                });
+            }
         });
     }
-    
-    // Initialize connection monitoring
-    handleConnectionStatus();
-    
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', function() {
-        stopAutoRefresh();
-    });
-</script>
-</body>
-</html>
 
-    <script>
-        // Modal functions
-        function openOwnedVehicleModal(bookingId, bookingRef) {
-            document.getElementById('owned_booking_id').value = bookingId;
-            document.getElementById('ownedVehicleModal').style.display = 'block';
-        }
+    // Initialize modals - ensure they start hidden
+    function initializeModals() {
+        const modals = [
+            'l1ContactModal', 
+            'container-update-modal', 
+            'vehicleAssignmentModal', 
+            'bookingDetailsModal'
+        ];
         
-        function openVendorVehicleModal(bookingId, bookingRef) {
-            document.getElementById('vendor_booking_id').value = bookingId;
-            document.getElementById('vendorVehicleModal').style.display = 'block';
-        }
-        
-        function openRejectModal(bookingId, bookingRef) {
-            document.getElementById('reject_booking_id').value = bookingId;
-            document.getElementById('rejectModal').style.display = 'block';
-        }
-        
-        function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-            // Reset forms
-            const form = document.querySelector('#' + modalId + ' form');
-            if (form) {
-                form.reset();
-                // Clear calculated fields
-                if (modalId === 'vendorVehicleModal') {
-                    document.getElementById('total_cost_display').value = '';
-                }
+        modals.forEach(modalId => {
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.style.display = 'none';
+                modal.classList.add('hidden');
             }
-        }
-        
-        // Calculate total cost for vendor vehicle
-        function calculateTotal() {
-            const rate = parseFloat(document.getElementById('rate_per_day').value) || 0;
-            const days = parseInt(document.getElementById('estimated_days').value) || 0;
-            const total = rate * days;
-            
-            document.getElementById('total_cost_display').value = total > 0 ? 
-                '₹' + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '';
-        }
-        
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
-            modals.forEach(modalId => {
-                const modal = document.getElementById(modalId);
-                if (event.target === modal) {
-                    closeModal(modalId);
-                }
-            });
-        }
-        
-        // Auto-refresh page every 30 seconds to check for new requests
+        });
+    }
+
+    // Auto-refresh functionality (reduced frequency and with user awareness)
+    function setupAutoRefresh() {
         setInterval(function() {
-            // Only refresh if no modals are open
-            const modalsOpen = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal']
-                .some(id => document.getElementById(id).style.display === 'block');
+            const modalsOpen = ['l1ContactModal', 'container-update-modal', 'vehicleAssignmentModal', 'bookingDetailsModal']
+                .some(id => {
+                    const modal = document.getElementById(id);
+                    return modal && modal.style.display === 'block';
+                });
             
             if (!modalsOpen) {
-                location.reload();
-            }
-        }, 30000);
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Escape key to close modals
-            if (e.key === 'Escape') {
-                const modals = ['ownedVehicleModal', 'vendorVehicleModal', 'rejectModal'];
-                modals.forEach(modalId => {
-                    if (document.getElementById(modalId).style.display === 'block') {
-                        closeModal(modalId);
+                const indicator = document.createElement('div');
+                indicator.className = 'fixed bottom-4 right-4 bg-blue-500 text-white px-3 py-2 rounded-lg text-sm';
+                indicator.innerHTML = '<i class="fas fa-sync-alt mr-2"></i>Checking for updates...';
+                document.body.appendChild(indicator);
+                
+                setTimeout(() => {
+                    indicator.remove();
+                    // Only refresh if no user interaction in the last few seconds
+                    if (document.hasFocus()) {
+                        location.reload();
                     }
-                });
+                }, 2000);
             }
-        });
-        
-        // Form validation
-        document.addEventListener('DOMContentLoaded', function() {
-            // Validate phone numbers
-            const phoneInputs = document.querySelectorAll('input[type="tel"]');
-            phoneInputs.forEach(input => {
-                input.addEventListener('input', function() {
-                    this.value = this.value.replace(/[^0-9+\-\s]/g, '');
-                });
-            });
-            
-            // Validate numeric inputs
-            const numericInputs = document.querySelectorAll('input[type="number"]');
-            numericInputs.forEach(input => {
-                input.addEventListener('input', function() {
-                    if (this.value < 0) this.value = 0;
-                });
-            });
-        });
-    </script>
+        }, 60000); // Check every 60 seconds
+    }
+
+    // Initialize everything when DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Initializing page...');
+        initializeModals();
+        enableDragAndDrop();
+        setupSearchInputs();
+        initializeEventListeners();
+        setupAutoRefresh();
+        console.log('Page initialization complete');
+    });
+
+    // Error handling for uncaught errors
+    window.addEventListener('error', function(e) {
+        console.error('JavaScript error:', e.error);
+        showNotification('An unexpected error occurred. Please refresh the page.', 'error');
+    });
+
+    // Handle unhandled promise rejections
+    window.addEventListener('unhandledrejection', function(e) {
+        console.error('Unhandled promise rejection:', e.reason);
+        showNotification('An error occurred while processing your request.', 'error');
+    });
+</script>
 </body>
 </html>
