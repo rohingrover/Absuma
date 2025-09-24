@@ -35,11 +35,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit;
     }
 
+    try {
     handleContainerImageUpload($pdo, $_POST, $_FILES);
 
     // Store submission hash to prevent duplicates
     $_SESSION['processed_submissions'][$booking_id][] = $submission_hash;
     echo json_encode(['success' => true, 'message' => 'Container details updated']);
+    } catch (Exception $e) {
+        error_log("Container update error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Failed to update container details: ' . $e->getMessage()]);
+    }
     exit;
 }
 
@@ -65,6 +70,12 @@ if (isset($_GET['ajax'])) {
             break;
         case 'get_booking_containers':
             getBookingContainers($pdo, $_GET['booking_id'] ?? 0);
+            break;
+        case 'search_vendor_vehicles':
+            searchVendorVehicles($pdo, $_GET['query'] ?? '', $_GET['vendor_id'] ?? 0);
+            break;
+        case 'search_owned_vehicles':
+            searchOwnedVehicles($pdo, $_GET['query'] ?? '');
             break;
         default:
             echo json_encode(['error' => 'Invalid request']);
@@ -290,6 +301,64 @@ function searchVendors($pdo, $query) {
     echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
+function searchVendorVehicles($pdo, $query, $vendor_id) {
+    $query = '%' . trim($query) . '%';
+    $stmt = $pdo->prepare("
+        SELECT id, vehicle_number, make, model, driver_name, status
+        FROM vendor_vehicles 
+        WHERE vendor_id = ? 
+        AND (vehicle_number LIKE ? OR make LIKE ? OR model LIKE ? OR driver_name LIKE ?)
+        AND (deleted_at IS NULL)
+        ORDER BY vehicle_number LIMIT 10
+    ");
+    $stmt->execute([$vendor_id, $query, $query, $query, $query]);
+    echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function searchOwnedVehicles($pdo, $query) {
+    $query = '%' . trim($query) . '%';
+    
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                id, 
+                vehicle_number, 
+                COALESCE(make_model, '') as make, 
+                '' as model,  
+                COALESCE(driver_name, 'No Driver') as driver_name,
+                'owned' as vehicle_type,
+                COALESCE(current_status, 'unknown') as status
+            FROM vehicles 
+            WHERE (
+                vehicle_number LIKE ? 
+                OR COALESCE(make_model, '') LIKE ? 
+                OR COALESCE(driver_name, '') LIKE ?
+                OR COALESCE(owner_name, '') LIKE ?
+            )
+            AND (
+                current_status IN ('available', 'on_trip', 'maintenance', 'inactive') 
+                OR current_status IS NULL
+            )
+            AND (
+                approval_status = 'approved' 
+                OR approval_status IS NULL
+            )
+            AND (deleted_at IS NULL)
+            ORDER BY vehicle_number 
+            LIMIT 10
+        ");
+        $stmt->execute([$query, $query, $query, $query]);
+        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+        
+    } catch (PDOException $e) {
+        error_log("Database error in searchOwnedVehicles: " . $e->getMessage());
+        echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
+    } catch (Exception $e) {
+        error_log("General error in searchOwnedVehicles: " . $e->getMessage());
+        echo json_encode(['error' => 'Search error: ' . $e->getMessage()]);
+    }
+}
+
 // New function to search unlinked vehicles (not tied to any vendor)
 function searchUnlinkedVehicles($pdo, $query) {
     $query = '%' . trim($query) . '%';
@@ -491,9 +560,14 @@ function debugContainerStatus($pdo, $booking_id) {
 
 // Fixed handleContainerImageUpload function with better status logic
 function handleContainerImageUpload($pdo, $data, $files) {
+    try {
     $booking_id = $data['booking_id'];
     $container_updates = $data['containers'] ?? [];
     $total_containers = $data['total_containers'] ?? 0;
+        
+        // Debug logging
+        error_log("Container update debug - Booking ID: $booking_id, Total containers: $total_containers");
+        error_log("Container updates: " . json_encode($container_updates));
     
     $upload_dir = 'uploads/container_images/' . $booking_id . '/';
     if (!file_exists($upload_dir)) {
@@ -513,27 +587,37 @@ function handleContainerImageUpload($pdo, $data, $files) {
         $from_location_data = parseLocationData($container_data['from_location'] ?? '');
         $to_location_data = parseLocationData($container_data['to_location'] ?? '');
         
+        // Debug location parsing
+        error_log("Container $key - From location: " . json_encode($from_location_data));
+        error_log("Container $key - To location: " . json_encode($to_location_data));
+        
         $image1_path = null;
         $image2_path = null;
         
         if (isset($files['container_images'])) {
             foreach ($files['container_images']['tmp_name'] as $file_key => $tmp_name) {
-                if (strpos($file_key, "container_${key}_image1") !== false && $tmp_name) {
-                    $image1_path = uploadImage($tmp_name, $upload_dir, "container_${key}_image1");
+                if (strpos($file_key, "container_{$key}_image1") !== false && $tmp_name) {
+                    $image1_path = uploadImage($tmp_name, $upload_dir, "container_{$key}_image1");
                 }
-                if (strpos($file_key, "container_${key}_image2") !== false && $tmp_name) {
-                    $image2_path = uploadImage($tmp_name, $upload_dir, "container_${key}_image2");
+                if (strpos($file_key, "container_{$key}_image2") !== false && $tmp_name) {
+                    $image2_path = uploadImage($tmp_name, $upload_dir, "container_{$key}_image2");
                 }
             }
         }
         
         if (!empty($container_data['id'])) {
             // Update existing container
+            try {
+                // Handle empty strings in PHP to avoid collation issues
+                $number1 = !empty($container_data['number1']) ? $container_data['number1'] : null;
+                $number2 = !empty($container_data['number2']) ? $container_data['number2'] : null;
+                $container_type = !empty($container_data['container_type']) ? $container_data['container_type'] : null;
+                
             $stmt = $pdo->prepare("
                 UPDATE booking_containers 
-                SET container_number_1 = COALESCE(NULLIF(?, ''), container_number_1),
-                    container_number_2 = COALESCE(NULLIF(?, ''), container_number_2),
-                    container_type = COALESCE(NULLIF(?, ''), container_type),
+                    SET container_number_1 = COALESCE(?, container_number_1),
+                        container_number_2 = COALESCE(?, container_number_2),
+                        container_type = COALESCE(?, container_type),
                     from_location_id = COALESCE(?, from_location_id),
                     from_location_type = COALESCE(?, from_location_type),
                     to_location_id = COALESCE(?, to_location_id),
@@ -545,9 +629,9 @@ function handleContainerImageUpload($pdo, $data, $files) {
                 WHERE id = ?
             ");
             $stmt->execute([
-                $container_data['number1'] ?? null,
-                $container_data['number2'] ?? null,
-                $container_data['container_type'] ?? null,
+                    $number1,
+                    $number2,
+                    $container_type,
                 $from_location_data['id'],
                 $from_location_data['type'],
                 $to_location_data['id'],
@@ -557,14 +641,25 @@ function handleContainerImageUpload($pdo, $data, $files) {
                 $_SESSION['user_id'],
                 $container_data['id']
             ]);
+                error_log("Successfully updated container ID: " . $container_data['id']);
+            } catch (Exception $e) {
+                error_log("Error updating container " . $container_data['id'] . ": " . $e->getMessage());
+                throw $e;
+            }
         } else {
             // Insert new container only if we have essential data
             if (!empty($container_data['number1']) || !empty($container_data['container_type'])) {
+                try {
                 $stmt = $pdo->prepare("
                     SELECT COUNT(*) as seq FROM booking_containers WHERE booking_id = ?
                 ");
                 $stmt->execute([$booking_id]);
                 $seq = $stmt->fetchColumn() + 1;
+                    
+                    // Handle empty strings in PHP to avoid collation issues
+                    $new_number1 = !empty($container_data['number1']) ? $container_data['number1'] : null;
+                    $new_number2 = !empty($container_data['number2']) ? $container_data['number2'] : null;
+                    $new_container_type = !empty($container_data['container_type']) ? $container_data['container_type'] : null;
                 
                 $stmt = $pdo->prepare("
                     INSERT INTO booking_containers (
@@ -579,9 +674,9 @@ function handleContainerImageUpload($pdo, $data, $files) {
                 $stmt->execute([
                     $booking_id,
                     $seq,
-                    $container_data['container_type'] ?? null,
-                    $container_data['number1'] ?? null,
-                    $container_data['number2'] ?? null,
+                        $new_container_type,
+                        $new_number1,
+                        $new_number2,
                     $from_location_data['id'],
                     $from_location_data['type'],
                     $to_location_data['id'],
@@ -591,10 +686,20 @@ function handleContainerImageUpload($pdo, $data, $files) {
                     $_SESSION['user_id'],
                     $_SESSION['user_id']
                 ]);
+                    $processed_count++;
+                    error_log("Successfully inserted new container for booking $booking_id");
+                } catch (Exception $e) {
+                    error_log("Error inserting new container: " . $e->getMessage());
+                    throw $e;
+                }
             }
         }
-        
-        $processed_count++;
+    }
+    
+    } catch (Exception $e) {
+        error_log("Fatal error in handleContainerImageUpload: " . $e->getMessage());
+        error_log("Stack trace: " . $e->getTraceAsString());
+        throw new Exception("Container update failed: " . $e->getMessage());
     }
     
     if ($processed_count > 0) {
@@ -734,35 +839,58 @@ function handleVehicleAssignment($pdo, $data) {
             // Handle vendor vehicles (new workflow)
             $vendor_id = $assignment['vendor_id'];
             $vehicle_number = $assignment['vehicle_number'];
+            $vendor_vehicle_id = $assignment['vendor_vehicle_id'] ?? null;
             $vendor_rate = $assignment['vendor_rate'] ?? 0;
+            
+            // Get vehicle number from vendor_vehicles table if vendor_vehicle_id is provided
+            $actual_vehicle_number = $vehicle_number; // Default to the entered vehicle number
+            if ($vendor_vehicle_id) {
+                $stmt = $pdo->prepare("SELECT vehicle_number FROM vendor_vehicles WHERE id = ? AND vendor_id = ?");
+                $stmt->execute([$vendor_vehicle_id, $vendor_id]);
+                $vendor_vehicle = $stmt->fetch();
+                if ($vendor_vehicle) {
+                    $actual_vehicle_number = $vendor_vehicle['vehicle_number'];
+                }
+            }
             
             // Create a vendor vehicle assignment record
             $stmt = $pdo->prepare("
                 INSERT INTO vendor_vehicle_assignments (
-                    booking_id, container_id, vendor_id, vehicle_number, 
+                    booking_id, container_id, vendor_id, 
                     daily_rate, assignment_status, created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'pending_confirmation', ?, NOW())
+                ) VALUES (?, ?, ?, ?, 'pending_confirmation', ?, NOW())
             ");
-            $stmt->execute([$booking_id, $container_id, $vendor_id, $vehicle_number, $vendor_rate, $_SESSION['user_id']]);
+            $stmt->execute([$booking_id, $container_id, $vendor_id, $vendor_rate, $_SESSION['user_id']]);
             $assignment_id = $pdo->lastInsertId();
             
-            // Update container with vendor assignment info
+            // Update container with vendor assignment info and rate
             $stmt = $pdo->prepare("
                 UPDATE booking_containers 
                 SET vendor_assignment_id = ?,
                     vehicle_type = 'vendor',
                     assignment_status = 'vendor_assigned',
+                    rate = ?,
                     updated_by = ?,
                     updated_at = NOW()
                 WHERE id = ?
             ");
-            $stmt->execute([$assignment_id, $_SESSION['user_id'], $container_id]);
+            $stmt->execute([$assignment_id, $vendor_rate, $_SESSION['user_id'], $container_id]);
+            
+            // If vendor_vehicle_id exists, update the vendor vehicle status
+            if ($vendor_vehicle_id) {
+                $stmt = $pdo->prepare("
+                    UPDATE vendor_vehicles 
+                    SET status = 'in_use', updated_at = NOW()
+                    WHERE id = ? AND vendor_id = ?
+                ");
+                $stmt->execute([$vendor_vehicle_id, $vendor_id]);
+            }
             
             // Send email to vendor
             sendVendorAssignmentEmail($pdo, $assignment_id);
             
             // Create trip with vendor details
-            $trip_id = createVendorTripForContainer($pdo, $booking_id, $container_id, $vendor_id, $vehicle_number, $vendor_rate);
+            $trip_id = createVendorTripForContainer($pdo, $booking_id, $container_id, $vendor_id, $actual_vehicle_number, $vendor_rate);
             
             $stmt = $pdo->prepare("
                 UPDATE booking_containers 
@@ -807,6 +935,31 @@ function handleVehicleAssignment($pdo, $data) {
     }
 }
 
+// Helper function to get location display name
+function getLocationDisplayName($pdo, $location_id, $location_type) {
+    if (!$location_id || !$location_type) {
+        return 'Unknown Location';
+    }
+    
+    try {
+        if ($location_type === 'yard') {
+            $stmt = $pdo->prepare("SELECT yard_name FROM yard_locations WHERE id = ?");
+            $stmt->execute([$location_id]);
+            $result = $stmt->fetch();
+            return $result ? $result['yard_name'] : 'Unknown Location';
+        } elseif ($location_type === 'location') {
+            $stmt = $pdo->prepare("SELECT location FROM location WHERE id = ?");
+            $stmt->execute([$location_id]);
+            $result = $stmt->fetch();
+            return $result ? $result['location'] : 'Unknown Location';
+        }
+    } catch (Exception $e) {
+        error_log("Error getting location display name: " . $e->getMessage());
+    }
+    
+    return 'Unknown Location';
+}
+
 // Function to create trip for vendor vehicle
 function createVendorTripForContainer($pdo, $booking_id, $container_id, $vendor_id, $vehicle_number, $vendor_rate) {
     // Get booking and container details
@@ -825,7 +978,7 @@ function createVendorTripForContainer($pdo, $booking_id, $container_id, $vendor_
         throw new Exception("Booking or container not found");
     }
     
-    $reference_number = 'VTR-' . date('Y') . '-' . str_pad($booking_id . $details['container_sequence'], 6, '0', STR_PAD_LEFT);
+    $reference_number = 'VTR-' . date('Y') . '-' . str_pad($booking_id . $details['container_sequence'], 6, '0', STR_PAD_LEFT) . '-' . $vehicle_number;
     
     // Get location names
     $from_location_name = getLocationDisplayName($pdo, $details['from_location_id'], $details['from_location_type']);
@@ -833,23 +986,23 @@ function createVendorTripForContainer($pdo, $booking_id, $container_id, $vendor_
     
     $stmt = $pdo->prepare("
         INSERT INTO trips (
-            reference_number, trip_date, vehicle_number, vehicle_type, movement_type,
+            reference_number, trip_date, vehicle_id, vehicle_type, movement_type,
             client_id, container_type, container_size, from_location, to_location, 
-            booking_number, is_vendor_vehicle, vendor_id, vendor_rate, status, 
+            booking_number, is_vendor_vehicle, vendor_rate, status, 
             created_at, updated_at
-        ) VALUES (?, CURDATE(), ?, 'vendor', 'export', ?, ?, ?, ?, ?, ?, 1, ?, ?, 'pending', NOW(), NOW())
+        ) VALUES (?, CURDATE(), ?, 'vendor', 'export', ?, ?, ?, ?, ?, ?, 1, ?, 'pending', NOW(), NOW())
     ");
     
+    // For vendor vehicles, use a special vehicle_id (0) and store vehicle number in reference
     $stmt->execute([
         $reference_number,
-        $vehicle_number,
+        0, // Special vehicle_id for vendor vehicles
         $details['client_id'],
         $details['container_type'],
         $details['container_type'],
         $from_location_name,
         $to_location_name,
         $details['booking_id'],
-        $vendor_id,
         $vendor_rate
     ]);
     
@@ -993,6 +1146,23 @@ function getBookingStatusInfo($booking) {
     $filled_containers = $booking['filled_containers'] ?? 0;
     $assigned_containers = $booking['assigned_containers'] ?? 0;
     
+    // Count containers ready for vehicle assignment (have container number, from location, and to location)
+    $ready_for_assignment = 0;
+    if (isset($booking['containers']) && is_array($booking['containers'])) {
+        foreach ($booking['containers'] as $container) {
+            $has_valid_from_location = $container['from_location_name'] && 
+                $container['from_location_name'] !== 'Unknown Location' && 
+                trim($container['from_location_name']) !== '';
+            $has_valid_to_location = $container['to_location_name'] && 
+                $container['to_location_name'] !== 'Unknown Location' && 
+                trim($container['to_location_name']) !== '';
+            
+            if ($container['container_number_1'] && $has_valid_from_location && $has_valid_to_location) {
+                $ready_for_assignment++;
+            }
+        }
+    }
+    
     $status_info = [
         'can_acknowledge' => false,
         'can_contact_l1' => false,
@@ -1022,16 +1192,16 @@ function getBookingStatusInfo($booking) {
             
         case 'containers_updated':
             $status_info['can_update_containers'] = true; // Allow further updates if needed
-            $status_info['can_assign_vehicles'] = true;
-            $status_info['progress_message'] = "Ready for vehicle assignment ({$filled_containers}/{$total_containers} containers ready)";
-            $status_info['next_action'] = 'Assign vehicles to containers';
+            $status_info['can_assign_vehicles'] = ($ready_for_assignment > 0);
+            $status_info['progress_message'] = "Ready for vehicle assignment: {$ready_for_assignment}/{$total_containers} containers have all required details (container number, from/to locations)";
+            $status_info['next_action'] = $ready_for_assignment > 0 ? 'Assign vehicles to containers' : 'Complete container details first';
             break;
             
         case 'partially_fulfilled':
             $status_info['can_update_containers'] = true; // Allow container updates for remaining
-            $status_info['can_assign_vehicles'] = true; // Allow vehicle assignment for remaining
-            $status_info['progress_message'] = "Vehicles assigned: {$assigned_containers}/{$total_containers} containers";
-            $status_info['next_action'] = 'Assign vehicles to remaining containers';
+            $status_info['can_assign_vehicles'] = ($ready_for_assignment > $assigned_containers);
+            $status_info['progress_message'] = "Vehicles assigned: {$assigned_containers}/{$total_containers} containers. Ready for assignment: {$ready_for_assignment} containers";
+            $status_info['next_action'] = ($ready_for_assignment > $assigned_containers) ? 'Assign vehicles to remaining containers' : 'Complete container details first';
             break;
             
         case 'confirmed':
@@ -1177,7 +1347,12 @@ foreach ($pending_bookings as &$booking) {
                bc.to_location_type,
                v.vehicle_number as owned_vehicle_number,
                vv.vehicle_number as vendor_vehicle_number,
-               t.reference_number as trip_reference
+               t.reference_number as trip_reference,
+               -- Vendor assignment information
+               va.vendor_id,
+               va.vehicle_number as vendor_assignment_vehicle_number,
+               va.daily_rate as vendor_daily_rate,
+               ven.company_name as vendor_company_name
         FROM booking_containers bc
         -- Left joins for regular locations
         LEFT JOIN location loc_from ON bc.from_location_id = loc_from.id AND bc.from_location_type = 'location'
@@ -1189,6 +1364,9 @@ foreach ($pending_bookings as &$booking) {
         LEFT JOIN vehicles v ON bc.assigned_vehicle_id = v.id AND bc.vehicle_type = 'owned'
         LEFT JOIN vendor_vehicles vv ON bc.assigned_vehicle_id = vv.id AND bc.vehicle_type = 'vendor'
         LEFT JOIN trips t ON bc.trip_id = t.id
+        -- Vendor assignment joins
+        LEFT JOIN vendor_vehicle_assignments va ON bc.vendor_assignment_id = va.id
+        LEFT JOIN vendors ven ON va.vendor_id = ven.id
         WHERE bc.booking_id = ? 
         ORDER BY bc.container_sequence
     ");
@@ -1213,6 +1391,16 @@ foreach ($pending_bookings as &$booking) {
                 'to_location_name' => $container['to_location_name'],
                 'container_image_1' => $container['container_image_1'],
                 'container_image_2' => $container['container_image_2'],
+                'assigned_vehicle_id' => $container['assigned_vehicle_id'],
+                'vendor_assignment_id' => $container['vendor_assignment_id'],
+                'vehicle_type' => $container['vehicle_type'],
+                'trip_id' => $container['trip_id'],
+                'assignment_status' => $container['assignment_status'],
+                'trip_reference' => $container['trip_reference'],
+                'vendor_id' => $container['vendor_id'],
+                'vendor_assignment_vehicle_number' => $container['vendor_assignment_vehicle_number'],
+                'vendor_daily_rate' => $container['vendor_daily_rate'],
+                'vendor_company_name' => $container['vendor_company_name'],
                 // Format location values for form fields
                 'from_location_value' => $container['from_location_type'] ? 
                     $container['from_location_type'] . '|' . $container['from_location_id'] : '',
@@ -1639,9 +1827,14 @@ $stats = [
                                             <div class="text-xs">Assign Vehicles</div>
                                             <div class="step-line"></div>
                                         </div>
-                                        <div class="step <?= in_array($booking['status'], ['partially_fulfilled', 'pending_vendor_approval', 'confirmed']) ? 'active' : 'pending' ?>">
+                                        <div class="step <?= $booking['status'] === 'partially_fulfilled' ? 'active' : (in_array($booking['status'], ['pending', 'being_addressed', 'awaiting_containers', 'containers_updated']) ? 'pending' : 'completed') ?>">
                                             <div class="step-number">4</div>
-                                            <div class="text-xs">Complete</div>
+                                            <div class="text-xs">Partially Fulfilled</div>
+                                            <div class="step-line"></div>
+                                        </div>
+                                        <div class="step <?= $booking['status'] === 'confirmed' ? 'active' : ($booking['status'] === 'partially_fulfilled' ? 'pending' : 'pending') ?>">
+                                            <div class="step-number">5</div>
+                                            <div class="text-xs">Completed</div>
                                         </div>
                                     </div>
 
@@ -1659,43 +1852,154 @@ $stats = [
                                     </div>
 
                                     <!-- Container Details -->
-                                  <div class="booking-card shadow-lg rounded-lg bg-white p-6">
+                                    <div class="bg-white rounded-xl shadow-soft p-6">
 										<input type="hidden" class="booking-containers-data" data-booking-id="<?= $booking['id'] ?>" value="<?= htmlspecialchars($booking['containers_json']) ?>">
 										
 										<div class="mb-6">
-											<h4 class="font-semibold text-gray-900 mb-3">Container Details (Filled: <?= $booking['filled_containers'] ?>/<?= $booking['no_of_containers'] ?? 0 ?> | Assigned: <?= $booking['assigned_containers'] ?>/<?= $booking['no_of_containers'] ?? 0 ?>)</h4>
-											<?php if (!empty($booking['containers'])): ?>
-												<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-													<?php foreach ($booking['containers'] as $container): ?>
-														<div class="container-card border rounded-lg p-4 <?= $container['assigned_vehicle_id'] ? 'border-blue-300 bg-blue-50' : '' ?>">
-													<div class="flex items-center gap-2 mb-3">
-														<span class="w-8 h-8 bg-teal-600 text-white rounded-full flex items-center justify-center text-xs font-bold">
-															<?= $container['container_sequence'] ?>
-														</span>
-														<span class="font-medium"><?= $container['container_type'] ?: 'Not specified' ?></span>
+											<div class="flex items-center justify-between mb-4">
+												<h4 class="text-lg font-semibold text-gray-900">Container Details</h4>
+												<div class="flex items-center gap-4 text-sm">
+													<div class="flex items-center gap-2">
+														<span class="w-3 h-3 bg-blue-500 rounded-full"></span>
+														<span class="text-gray-600">Assigned: <?= $booking['assigned_containers'] ?>/<?= $booking['no_of_containers'] ?? 0 ?></span>
 													</div>
-													<div class="text-sm text-gray-600 space-y-1">
-														<p>Number 1: <?= htmlspecialchars($container['container_number_1'] ?: 'Pending') ?></p>
+													<div class="flex items-center gap-2">
+														<span class="w-3 h-3 bg-green-500 rounded-full"></span>
+														<span class="text-gray-600">Filled: <?= $booking['filled_containers'] ?>/<?= $booking['no_of_containers'] ?? 0 ?></span>
+													</div>
+												</div>
+											</div>
+											
+											<?php if (!empty($booking['containers'])): ?>
+												<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+													<?php foreach ($booking['containers'] as $container): 
+														// Check if container is ready for vehicle assignment
+														$has_valid_from_location = $container['from_location_name'] && 
+															$container['from_location_name'] !== 'Unknown Location' && 
+															trim($container['from_location_name']) !== '';
+														$has_valid_to_location = $container['to_location_name'] && 
+															$container['to_location_name'] !== 'Unknown Location' && 
+															trim($container['to_location_name']) !== '';
+														$is_ready_for_assignment = $container['container_number_1'] && $has_valid_from_location && $has_valid_to_location;
+													?>
+														<div class="relative bg-white border-2 rounded-xl p-5 transition-all duration-200 hover:shadow-md <?= ($container['assigned_vehicle_id'] || $container['vendor_assignment_id']) ? 'border-blue-300 bg-blue-50' : ($is_ready_for_assignment ? 'border-green-300 bg-green-50' : 'border-gray-200') ?>">
+															<!-- Container Header -->
+															<div class="flex items-center justify-between mb-4">
+																<div class="flex items-center gap-3">
+																	<div class="w-10 h-10 bg-teal-600 text-white rounded-full flex items-center justify-center text-sm font-bold">
+															<?= $container['container_sequence'] ?>
+																	</div>
+																	<div>
+																		<h5 class="font-semibold text-gray-900"><?= $container['container_type'] ?: 'Not specified' ?></h5>
+																		<p class="text-xs text-gray-500">Container <?= $container['container_sequence'] ?></p>
+																	</div>
+																</div>
+																<?php if ($is_ready_for_assignment && !$container['assigned_vehicle_id'] && !$container['vendor_assignment_id']): ?>
+																	<span class="px-3 py-1 bg-green-100 text-green-800 text-xs rounded-full font-medium">
+																		<i class="fas fa-check mr-1"></i>Ready
+														</span>
+																<?php elseif ($container['assigned_vehicle_id'] || $container['vendor_assignment_id']): ?>
+																	<span class="px-3 py-1 bg-blue-100 text-blue-800 text-xs rounded-full font-medium">
+																		<i class="fas fa-truck mr-1"></i>Assigned
+																	</span>
+																<?php else: ?>
+																	<span class="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-medium">
+																		<i class="fas fa-clock mr-1"></i>Pending
+																	</span>
+																<?php endif; ?>
+													</div>
+															
+															<!-- Container Details -->
+															<div class="space-y-3">
+																<div class="grid grid-cols-2 gap-3">
+																	<div>
+																		<p class="text-xs text-gray-500 mb-1">Container Number</p>
+																		<p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($container['container_number_1'] ?: 'Pending') ?></p>
+																	</div>
 														<?php if ($container['container_number_2']): ?>
-															<p>Number 2: <?= htmlspecialchars($container['container_number_2']) ?></p>
+																		<div>
+																			<p class="text-xs text-gray-500 mb-1">Number 2</p>
+																			<p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($container['container_number_2']) ?></p>
+																		</div>
 														<?php endif; ?>
-														<p>From: <?= htmlspecialchars($container['from_location_name'] ?: 'Pending') ?></p>
-														<p>To: <?= htmlspecialchars($container['to_location_name'] ?: 'Pending') ?></p>
-														<p>Assignment: <?= $container['assignment_status'] ?: 'Pending' ?></p>
+																</div>
+																
+																<div class="border-t pt-3">
+																	<div class="space-y-2">
+																		<div class="flex items-center gap-2">
+																			<i class="fas fa-map-marker-alt text-gray-400 text-xs"></i>
+																			<div>
+																				<p class="text-xs text-gray-500">From</p>
+																				<p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($container['from_location_name'] ?: 'Pending') ?></p>
+																			</div>
+																		</div>
+																		<div class="flex items-center gap-2">
+																			<i class="fas fa-flag-checkered text-gray-400 text-xs"></i>
+																			<div>
+																				<p class="text-xs text-gray-500">To</p>
+																				<p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($container['to_location_name'] ?: 'Pending') ?></p>
+																			</div>
+																		</div>
+																	</div>
+																</div>
+																
+																<?php if ($container['assigned_vehicle_id'] || $container['vendor_assignment_id']): ?>
+																	<div class="border-t pt-3 bg-gray-50 -mx-5 px-5 py-3 rounded-b-xl">
+																		<div class="space-y-2">
+																			<div class="flex items-center gap-2">
+																				<i class="fas fa-truck text-blue-500 text-xs"></i>
+																				<div>
+																					<p class="text-xs text-gray-500">Vehicle</p>
+																					<p class="text-sm font-medium text-gray-900">
 														<?php if ($container['assigned_vehicle_id']): ?>
-															<p>Vehicle: <?= htmlspecialchars($container['owned_vehicle_number'] ?: $container['vendor_vehicle_number']) ?> (<?= $container['vehicle_type'] ?>)</p>
-															<p>Trip: <?= htmlspecialchars($container['trip_reference'] ?: 'Not created') ?></p>
+																							<?= htmlspecialchars($container['owned_vehicle_number'] ?: $container['vendor_vehicle_number']) ?> (<?= $container['vehicle_type'] ?>)
+																						<?php elseif ($container['vendor_assignment_id']): ?>
+																							<?= htmlspecialchars($container['vendor_assignment_vehicle_number'] ?: 'Vendor Vehicle') ?> (vendor)
+																						<?php endif; ?>
+																					</p>
+																				</div>
+																			</div>
+																			<div class="flex items-center gap-2">
+																				<i class="fas fa-route text-blue-500 text-xs"></i>
+																				<div>
+																					<p class="text-xs text-gray-500">Trip</p>
+																					<p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($container['trip_reference'] ?: 'Not created') ?></p>
+																				</div>
+																			</div>
+																			<?php if ($container['vendor_assignment_id']): ?>
+																			<div class="flex items-center gap-2">
+																				<i class="fas fa-building text-blue-500 text-xs"></i>
+																				<div>
+																					<p class="text-xs text-gray-500">Vendor</p>
+																					<p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($container['vendor_company_name'] ?: 'Unknown Vendor') ?></p>
+																				</div>
+																			</div>
+																			<div class="flex items-center gap-2">
+																				<i class="fas fa-rupee-sign text-blue-500 text-xs"></i>
+																				<div>
+																					<p class="text-xs text-gray-500">Rate</p>
+																					<p class="text-sm font-medium text-gray-900">₹<?= number_format($container['vendor_daily_rate'] ?: 0, 2) ?>/day</p>
+																				</div>
+																			</div>
+																			<?php endif; ?>
+																		</div>
+																	</div>
 														<?php endif; ?>
 													</div>
 												</div>
 											<?php endforeach; ?>
 										</div>
 									<?php else: ?>
-										<div class="text-center text-gray-500 py-8">
-                <i class="fas fa-cube text-3xl mb-3"></i>
-                <p>Awaiting container details (0/<?= $booking['no_of_containers'] ?? 0 ?> filled)</p>
+												<div class="text-center py-12">
+													<div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+														<i class="fas fa-cube text-2xl text-gray-400"></i>
+													</div>
+													<h3 class="text-lg font-medium text-gray-900 mb-2">No Container Details Yet</h3>
+													<p class="text-gray-500 mb-4">Container details will appear here once they are added.</p>
+													<p class="text-sm text-gray-400">Expected: <?= $booking['no_of_containers'] ?? 0 ?> containers</p>
             </div>
         <?php endif; ?>
+										</div>
 								</div>
 
                                     <!-- Action Buttons -->
@@ -1735,7 +2039,7 @@ $stats = [
 									<?php endif; ?>
 
 									<?php if ($status_info['can_update_containers']): ?>
-										<button onclick="openContainerUpdateModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>')" class="btn-enhanced btn-success">
+										<button onclick="openContainerUpdateModal(<?= $booking['id'] ?>, '<?= htmlspecialchars($booking['booking_id']) ?>', <?= $booking['status'] === 'partially_fulfilled' ? 'true' : 'false' ?>)" class="btn-enhanced btn-success">
 											<i class="fas fa-upload mr-2"></i>
 											<?= $booking['status'] === 'partially_fulfilled' ? 'Update Remaining Containers' : 'Update Container Details' ?>
 										</button>
@@ -1934,6 +2238,7 @@ $stats = [
         locations: null,
         vehicles: null,
         vendors: null,
+        vendor_vehicles: null,
         l1_supervisors: null
     };
 
@@ -2009,7 +2314,7 @@ Thank you!`;
     }
 
     // FIXED: Container update modal function
-    function openContainerUpdateModal(bookingId, bookingRef) {
+    function openContainerUpdateModal(bookingId, bookingRef, isRemainingContainers = false) {
         const modal = document.getElementById('container-update-modal');
         if (!modal) {
             console.error('Container update modal not found');
@@ -2031,14 +2336,21 @@ Thank you!`;
             }
         }
 
-        loadContainerForms(bookingId);
+        // Pass the excludeTripCreated parameter based on whether this is for remaining containers
+        loadContainerForms(bookingId, isRemainingContainers);
         openModal('container-update-modal');
     }
 
     // Load container forms dynamically
-function loadContainerForms(bookingId) {
+function loadContainerForms(bookingId, excludeTripCreated = false) {
     const formsSection = document.getElementById('container-forms-section');
     if (!formsSection) return;
+    
+    // Update modal title based on whether we're excluding trip-created containers
+    const modalTitle = document.querySelector('#container-update-modal h2');
+    if (modalTitle) {
+        modalTitle.textContent = excludeTripCreated ? 'Update Remaining Container Details' : 'Update Container Details';
+    }
 
     const bookingCard = document.querySelector(`[data-booking-id="${bookingId}"]`);
     const containersDataInput = bookingCard ? bookingCard.querySelector('.booking-containers-data') : null;
@@ -2053,8 +2365,32 @@ function loadContainerForms(bookingId) {
     }
 
     const totalContainers = containersData.total_containers || 0;
-    const existingContainers = containersData.existing_containers || [];
+    let existingContainers = containersData.existing_containers || [];
+    
+    // Filter out containers with trips created if requested
+    const originalContainerCount = existingContainers.length;
+    if (excludeTripCreated) {
+        existingContainers = existingContainers.filter(container => 
+            !container.trip_id && container.assignment_status !== 'trip_created'
+        );
+    }
+    
     let formsHTML = '';
+    
+    // Show info message if containers were filtered out
+    if (excludeTripCreated && originalContainerCount > existingContainers.length) {
+        const filteredCount = originalContainerCount - existingContainers.length;
+        formsHTML += `
+            <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div class="flex items-center">
+                    <i class="fas fa-info-circle text-blue-600 mr-2"></i>
+                    <span class="text-sm text-blue-800">
+                        ${filteredCount} container(s) with trips already created are hidden. Only remaining containers are shown below.
+                    </span>
+                </div>
+            </div>
+        `;
+    }
 
     // Load existing containers with proper location value handling
     existingContainers.forEach((container, index) => {
@@ -2070,7 +2406,7 @@ function loadContainerForms(bookingId) {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Container Type</label>
-                        <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')">
+                        <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')" style="-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 40px;">
                             <option value="">Select type</option>
                             <option value="20ft" ${container.container_type === '20ft' ? 'selected' : ''}>20ft</option>
                             <option value="40ft" ${container.container_type === '40ft' ? 'selected' : ''}>40ft</option>
@@ -2132,7 +2468,8 @@ function loadContainerForms(bookingId) {
         `;
     });
 
-    // Add forms for remaining new containers (similar structure but without existing data)
+    // Only add new containers if not excluding trip-created containers (i.e., for initial setup)
+    if (!excludeTripCreated) {
     const remaining = totalContainers - existingContainers.length;
     for (let i = 0; i < remaining; i++) {
         const key = `new_${i}`;
@@ -2146,7 +2483,7 @@ function loadContainerForms(bookingId) {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Container Type</label>
-                        <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')">
+                            <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')" style="-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 40px;">
                             <option value="">Select type</option>
                             <option value="20ft">20ft</option>
                             <option value="40ft">40ft</option>
@@ -2203,6 +2540,7 @@ function loadContainerForms(bookingId) {
                 </div>
             </div>
         `;
+        }
     }
 
     formsSection.innerHTML = formsHTML;
@@ -2250,7 +2588,19 @@ function loadVehicleAssignmentForms(bookingId) {
     let formsHTML = '';
 
     containers.forEach((container, index) => {
-        if (container.container_number_1) { // Only show containers with details
+        // Only show containers that have container number AND both from and to locations (not "Unknown Location")
+        const hasValidFromLocation = container.from_location_name && 
+                                    container.from_location_name !== 'Unknown Location' && 
+                                    container.from_location_name.trim() !== '';
+        const hasValidToLocation = container.to_location_name && 
+                                  container.to_location_name !== 'Unknown Location' && 
+                                  container.to_location_name.trim() !== '';
+        
+        // Filter out containers that are already assigned or have trips created
+        const isAlreadyAssigned = container.assigned_vehicle_id || container.assignment_status === 'trip_created';
+        const hasTripCreated = container.trip_id || container.assignment_status === 'trip_created';
+        
+        if (container.container_number_1 && hasValidFromLocation && hasValidToLocation && !isAlreadyAssigned && !hasTripCreated) {
             formsHTML += `
                 <div class="assignment-form bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4">
                     <div class="flex items-center justify-between mb-4">
@@ -2264,7 +2614,7 @@ function loadVehicleAssignmentForms(bookingId) {
                         <!-- Vehicle Type Selection -->
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">Vehicle Type</label>
-                            <select name="assignments[${container.id}][vehicle_type]" class="input-enhanced" onchange="handleVehicleTypeChange(this, ${container.id})">
+                            <select name="assignments[${container.id}][vehicle_type]" class="input-enhanced" onchange="handleVehicleTypeChange(this, ${container.id})" style="-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 40px;">
                                 <option value="">Select type...</option>
                                 <option value="owned">Owned Vehicle</option>
                                 <option value="vendor">Vendor Vehicle</option>
@@ -2291,7 +2641,7 @@ function loadVehicleAssignmentForms(bookingId) {
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Search Vendor *</label>
                                     <div class="relative">
-                                        <input type="text" class="input-enhanced vendor-search" placeholder="Search vendor company..." onkeyup="searchVendors(this, 'assignments[${container.id}][vendor_id]')">
+                                        <input type="text" class="input-enhanced vendor-search" placeholder="Search vendor company..." onkeyup="searchVendors(this, 'assignments[${container.id}][vendor_id]')" onchange="handleVendorSelection(this, ${container.id})">
                                         <input type="hidden" name="assignments[${container.id}][vendor_id]">
                                         <div class="search-dropdown"></div>
                                     </div>
@@ -2299,15 +2649,16 @@ function loadVehicleAssignmentForms(bookingId) {
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Vehicle Number *</label>
                                     <div class="relative">
-                                        <input type="text" class="input-enhanced vehicle-number-input" name="assignments[${container.id}][vehicle_number]" placeholder="Enter or search vehicle number..." onkeyup="searchUnlinkedVehicles(this)">
+                                        <input type="text" class="input-enhanced vendor-vehicle-search" id="vehicle_number_${container.id}" name="assignments[${container.id}][vehicle_number]" placeholder="Enter or search vehicle number..." onkeyup="searchVendorVehicles(this, 'assignments[${container.id}][vendor_vehicle_id]')" disabled>
+                                        <input type="hidden" name="assignments[${container.id}][vendor_vehicle_id]">
                                         <div class="search-dropdown"></div>
                                     </div>
                                 </div>
                             </div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Daily Rate (USD) *</label>
-                                    <input type="number" name="assignments[${container.id}][vendor_rate]" class="input-enhanced" placeholder="0.00" step="0.01" min="0" required>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Daily Rate *</label>
+                                    <input type="number" id="vendor_rate_${container.id}" name="assignments[${container.id}][vendor_rate]" class="input-enhanced" placeholder="0.00" step="0.01" min="0" required disabled>
                                 </div>
                             </div>
                         </div>
@@ -2322,23 +2673,105 @@ function loadVehicleAssignmentForms(bookingId) {
     });
 
     if (formsHTML === '') {
-        formsHTML = '<div class="text-center text-gray-500 py-8">No containers available for vehicle assignment. Please update container details first.</div>';
+        formsHTML = '<div class="text-center text-gray-500 py-8">No containers available for vehicle assignment. Please ensure containers have:<br><br>• Container number<br>• From location<br>• To location<br>• Not already assigned<br>• No trip created<br><br>Update container details first or assign vehicles to remaining containers.</div>';
     }
 
     assignmentSection.innerHTML = formsHTML;
     setupSearchInputs();
 }
 
-    // Toggle vendor rate field
-    function toggleVendorRate(selectElement, index) {
-        const rateSection = selectElement.closest('.assignment-form').querySelector('.vendor-rate-section');
-        if (selectElement.value === 'vendor') {
-            rateSection.style.display = 'block';
-            rateSection.querySelector('input').required = true;
+    // Handle vehicle type change
+    function handleVehicleTypeChange(selectElement, containerId) {
+        const ownedSection = document.getElementById(`owned-section-${containerId}`);
+        const vendorSection = document.getElementById(`vendor-section-${containerId}`);
+        const helpText = document.getElementById(`help-text-${containerId}`);
+        
+        // Hide both sections first
+        if (ownedSection) ownedSection.style.display = 'none';
+        if (vendorSection) vendorSection.style.display = 'none';
+        
+        if (selectElement.value === 'owned') {
+            if (ownedSection) ownedSection.style.display = 'block';
+            if (helpText) helpText.textContent = 'Search and select an owned vehicle from the dropdown.';
+        } else if (selectElement.value === 'vendor') {
+            if (vendorSection) vendorSection.style.display = 'block';
+            if (helpText) helpText.textContent = 'Select a vendor and enter vehicle details. You can search existing vendor vehicles or add a new one.';
         } else {
-            rateSection.style.display = 'none';
-            rateSection.querySelector('input').required = false;
+            if (helpText) helpText.textContent = 'Please select a vehicle type to continue.';
         }
+    }
+
+    // Handle vendor selection
+    function handleVendorSelection(vendorInput, containerId) {
+        const vehicleNumberInput = document.getElementById(`vehicle_number_${containerId}`);
+        const rateInput = document.getElementById(`vendor_rate_${containerId}`);
+        const helpText = document.getElementById(`help-text-${containerId}`);
+        
+        // Check if vendor is selected
+        const form = vendorInput.closest('.assignment-form');
+        const vendorIdInput = form.querySelector('input[name*="[vendor_id]"]');
+        const vendorId = vendorIdInput ? vendorIdInput.value : '';
+        
+        if (vendorId) {
+            // Enable vehicle number and rate fields
+            if (vehicleNumberInput) {
+                vehicleNumberInput.disabled = false;
+                vehicleNumberInput.placeholder = "Enter or search vehicle number...";
+            }
+            if (rateInput) {
+                rateInput.disabled = false;
+            }
+            if (helpText) {
+                helpText.textContent = 'Vendor selected. Now enter vehicle number and rate.';
+            }
+        } else {
+            // Disable fields if no vendor selected
+            if (vehicleNumberInput) {
+                vehicleNumberInput.disabled = true;
+                vehicleNumberInput.value = '';
+                vehicleNumberInput.placeholder = "Select vendor first...";
+            }
+            if (rateInput) {
+                rateInput.disabled = true;
+                rateInput.value = '';
+            }
+            if (helpText) {
+                helpText.textContent = 'Select a vendor first to enable vehicle and rate fields.';
+            }
+        }
+    }
+
+    // Search vendor vehicles
+    function searchVendorVehicles(input, hiddenFieldName) {
+        const query = input.value.trim();
+        if (query.length < 2) {
+            hideSearchDropdown(input);
+            return;
+        }
+        
+        // Get the vendor ID from the same form
+        const form = input.closest('.assignment-form');
+        const vendorIdInput = form.querySelector('input[name*="[vendor_id]"]');
+        const vendorId = vendorIdInput ? vendorIdInput.value : '';
+        
+        if (!vendorId) {
+            hideSearchDropdown(input);
+            return;
+        }
+        
+        clearTimeout(searchTimeouts.vendor_vehicles);
+        
+        searchTimeouts.vendor_vehicles = setTimeout(() => {
+            fetch(`?ajax=search_vendor_vehicles&query=${encodeURIComponent(query)}&vendor_id=${vendorId}`)
+                .then(response => response.json())
+                .then(data => {
+                    showSearchResults(input, data, hiddenFieldName, 'vendor_vehicle');
+                })
+                .catch(error => {
+                    console.error('Search error:', error);
+                    showSearchResults(input, [], hiddenFieldName, 'vendor_vehicle');
+                });
+        }, 300);
     }
 
     // FIXED: Search functions with proper error handling
@@ -2374,7 +2807,7 @@ function loadVehicleAssignmentForms(bookingId) {
         clearTimeout(searchTimeouts.vehicles);
         
         searchTimeouts.vehicles = setTimeout(() => {
-            fetch(`?ajax=search_vehicles&query=${encodeURIComponent(query)}`)
+            fetch(`?ajax=search_owned_vehicles&query=${encodeURIComponent(query)}`)
                 .then(response => response.json())
                 .then(data => {
                     showSearchResults(input, data, hiddenFieldName, 'vehicle');
@@ -2485,6 +2918,10 @@ function showSearchResults(input, data, hiddenFieldName, type) {
                 case 'l1_supervisor':
                     displayText = `${item.full_name} (${item.phone_number || item.mobile})`;
                     value = item.phone_number || item.mobile;
+                    break;
+                case 'vendor_vehicle':
+                    displayText = `${item.vehicle_number} - ${item.make || ''} ${item.model || ''} (${item.driver_name || 'No Driver'})`;
+                    value = item.id;
                     break;
             }
             
@@ -2618,6 +3055,14 @@ function submitContainerForm() {
                 setTimeout(() => {
                     input.classList.remove('border-green-500');
                 }, 2000);
+                
+                // If this is a vendor selection, trigger the vendor selection handler
+                if (hiddenFieldName.includes('vendor_id')) {
+                    const containerId = hiddenFieldName.match(/assignments\[(\d+)\]/);
+                    if (containerId) {
+                        handleVendorSelection(input, containerId[1]);
+                    }
+                }
             }
         }
     }
