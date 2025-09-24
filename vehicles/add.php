@@ -489,7 +489,7 @@ if (isset($_SESSION['error'])) {
                     </div>
                     
                     <div class="p-6">
-                        <form id="vehicleForm" method="POST" action="add_vehicle.php" class="form-grid">
+                        <form id="vehicleForm" method="POST" action="add.php" class="form-grid">
                             <!-- Vehicle Number -->
                             <div class="form-field">
                                 <label for="vehicle_number" class="block text-sm font-medium text-gray-700">Vehicle Number <span class="text-red-500">*</span></label>
