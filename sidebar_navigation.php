@@ -9,7 +9,7 @@ if (!isset($_SESSION['role'])) {
 // Calculate relative path to project root
 $php_self = $_SERVER['PHP_SELF'];
 $slash_count = substr_count($php_self, '/');
-$base_slashes = 2; // Assuming structure like /absuma/page.php or /absuma/sub/page.php
+$base_slashes = 1; // Assuming structure like /absuma/page.php or /absuma/sub/page.php
 $levels = max(0, $slash_count - $base_slashes);
 $relative_to_root = str_repeat('../', $levels);
 

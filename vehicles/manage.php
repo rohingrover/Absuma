@@ -52,13 +52,33 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['action']) && canApprov
                 $proposed_data = json_decode($request['proposed_data'], true);
                 
                 if ($request['request_type'] === 'create') {
-                    // Insert new vehicle
-                    $columns = implode(', ', array_keys($proposed_data));
-                    $placeholders = ':' . implode(', :', array_keys($proposed_data));
+                    // Separate vehicle data from financing data
+                    $vehicle_columns = ['vehicle_number', 'driver_name', 'owner_name', 'make_model', 'manufacturing_year', 'gvw', 'is_financed'];
+                    $financing_columns = ['bank_name', 'loan_amount', 'interest_rate', 'loan_tenure_months', 'emi_amount', 'loan_start_date', 'loan_end_date'];
+                    
+                    $vehicle_data = array_intersect_key($proposed_data, array_flip($vehicle_columns));
+                    $financing_data = array_intersect_key($proposed_data, array_flip($financing_columns));
+                    
+                    // Insert vehicle
+                    $columns = implode(', ', array_keys($vehicle_data));
+                    $placeholders = ':' . implode(', :', array_keys($vehicle_data));
                     $sql = "INSERT INTO vehicles ($columns, approval_status, last_approved_by, last_approved_at) VALUES ($placeholders, 'approved', :approved_by, NOW())";
                     $stmt = $pdo->prepare($sql);
-                    $proposed_data['approved_by'] = $_SESSION['user_id'];
-                    $stmt->execute($proposed_data);
+                    $vehicle_data['approved_by'] = $_SESSION['user_id'];
+                    $stmt->execute($vehicle_data);
+                    
+                    $vehicle_id = $pdo->lastInsertId();
+                    
+                    // Insert financing data if vehicle is financed
+                    if ($vehicle_data['is_financed'] == 1 && !empty(array_filter($financing_data))) {
+                        $financing_data['vehicle_id'] = $vehicle_id;
+                        $financing_data['is_financed'] = 1;
+                        $financing_columns_str = implode(', ', array_keys($financing_data));
+                        $financing_placeholders = ':' . implode(', :', array_keys($financing_data));
+                        $financing_sql = "INSERT INTO vehicle_financing ($financing_columns_str) VALUES ($financing_placeholders)";
+                        $stmt = $pdo->prepare($financing_sql);
+                        $stmt->execute($financing_data);
+                    }
                     
                 } elseif ($request['request_type'] === 'update') {
                     // Update existing vehicle
