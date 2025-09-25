@@ -1301,8 +1301,8 @@ $stmt = $pdo->prepare("
         creator.full_name as created_by_name,
         creator.role as creator_role,
         ack_user.full_name as acknowledged_by_name,
-        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.assigned_vehicle_id IS NOT NULL) as assigned_containers,
-        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.container_number_1 IS NOT NULL) as filled_containers,
+        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND (bc.assigned_vehicle_id IS NOT NULL OR bc.vendor_assignment_id IS NOT NULL)) as assigned_containers,
+        (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.container_number_1 IS NOT NULL AND bc.container_number_1 != '' AND bc.from_location_id IS NOT NULL AND bc.to_location_id IS NOT NULL) as filled_containers,
         (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.container_image_1 IS NOT NULL) as containers_with_images,
         (SELECT COUNT(*) FROM booking_containers bc WHERE bc.booking_id = b.id AND bc.trip_id IS NOT NULL) as containers_with_trips
     FROM bookings b
