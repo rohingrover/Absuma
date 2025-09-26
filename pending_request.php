@@ -842,8 +842,11 @@ function handleVehicleAssignment($pdo, $data) {
             $vendor_vehicle_id = $assignment['vendor_vehicle_id'] ?? null;
             $vendor_rate = $assignment['vendor_rate'] ?? 0;
             
+            // Format vehicle number: CAPS and remove spaces
+            $formatted_vehicle_number = strtoupper(str_replace(' ', '', $vehicle_number));
+            
             // Get vehicle number from vendor_vehicles table if vendor_vehicle_id is provided
-            $actual_vehicle_number = $vehicle_number; // Default to the entered vehicle number
+            $actual_vehicle_number = $formatted_vehicle_number; // Default to the formatted entered vehicle number
             if ($vendor_vehicle_id) {
                 $stmt = $pdo->prepare("SELECT vehicle_number FROM vendor_vehicles WHERE id = ? AND vendor_id = ?");
                 $stmt->execute([$vendor_vehicle_id, $vendor_id]);
@@ -857,10 +860,10 @@ function handleVehicleAssignment($pdo, $data) {
             $stmt = $pdo->prepare("
                 INSERT INTO vendor_vehicle_assignments (
                     booking_id, container_id, vendor_id, 
-                    daily_rate, assignment_status, created_by, created_at
-                ) VALUES (?, ?, ?, ?, 'pending_confirmation', ?, NOW())
+                    vehicle_number, daily_rate, assignment_status, created_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, 'pending_confirmation', ?, NOW())
             ");
-            $stmt->execute([$booking_id, $container_id, $vendor_id, $vendor_rate, $_SESSION['user_id']]);
+            $stmt->execute([$booking_id, $container_id, $vendor_id, $actual_vehicle_number, $vendor_rate, $_SESSION['user_id']]);
             $assignment_id = $pdo->lastInsertId();
             
             // Update container with vendor assignment info and rate
@@ -2410,7 +2413,7 @@ function loadContainerForms(bookingId, excludeTripCreated = false) {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Container Type</label>
-                        <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')" style="-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 40px;">
+                        <select name="containers[${key}][container_type]" class="input-enhanced"  style="-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 40px;">
                             <option value="">Select type</option>
                             <option value="20ft" ${container.container_type === '20ft' ? 'selected' : ''}>20ft</option>
                             <option value="40ft" ${container.container_type === '40ft' ? 'selected' : ''}>40ft</option>
@@ -2419,12 +2422,6 @@ function loadContainerForms(bookingId, excludeTripCreated = false) {
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 1</label>
                         <input type="text" name="containers[${key}][number1]" class="input-enhanced" placeholder="Enter container number" value="${container.container_number_1 || ''}" ${isNumber1Readonly}>
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 container-number2-section" style="display: ${container.container_type === '20ft' ? 'block' : 'none'};">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 2 (optional for 20ft)</label>
-                        <input type="text" name="containers[${key}][number2]" class="input-enhanced" placeholder="Enter second container number" value="${container.container_number_2 || ''}" ${isNumber1Readonly}>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -2487,7 +2484,7 @@ function loadContainerForms(bookingId, excludeTripCreated = false) {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Container Type</label>
-                            <select name="containers[${key}][container_type]" class="input-enhanced" onchange="toggleContainerNumber2(this, '${key}')" style="-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 40px;">
+                            <select name="containers[${key}][container_type]" class="input-enhanced"  style="-webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'m6 8 4 4 4-4\'/%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 40px;">
                             <option value="">Select type</option>
                             <option value="20ft">20ft</option>
                             <option value="40ft">40ft</option>
@@ -2496,12 +2493,6 @@ function loadContainerForms(bookingId, excludeTripCreated = false) {
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 1</label>
                         <input type="text" name="containers[${key}][number1]" class="input-enhanced" placeholder="Enter container number">
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 container-number2-section" style="display: none;">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Container Number 2 (optional for 20ft)</label>
-                        <input type="text" name="containers[${key}][number2]" class="input-enhanced" placeholder="Enter second container number">
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -2550,19 +2541,6 @@ function loadContainerForms(bookingId, excludeTripCreated = false) {
     formsSection.innerHTML = formsHTML;
     setupSearchInputs();
 }
-    // Toggle container number 2 based on type
-    function toggleContainerNumber2(selectElement, key) {
-        const section = selectElement.closest('.container-form').querySelector('.container-number2-section');
-        const number2Input = section.querySelector(`input[name="containers[${key}][number2]"]`);
-        if (selectElement.value === '20ft') {
-            section.style.display = 'block';
-            number2Input.disabled = false;
-        } else {
-            section.style.display = 'none';
-            number2Input.disabled = true;
-            number2Input.value = '';
-        }
-    }
 
     // FIXED: Vehicle assignment modal function
     function openVehicleAssignmentModal(bookingId, bookingRef) {
@@ -2653,7 +2631,7 @@ function loadVehicleAssignmentForms(bookingId) {
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Vehicle Number *</label>
                                     <div class="relative">
-                                        <input type="text" class="input-enhanced vendor-vehicle-search" id="vehicle_number_${container.id}" name="assignments[${container.id}][vehicle_number]" placeholder="Enter or search vehicle number..." onkeyup="searchVendorVehicles(this, 'assignments[${container.id}][vendor_vehicle_id]')" disabled>
+                                        <input type="text" class="input-enhanced vendor-vehicle-search" id="vehicle_number_${container.id}" name="assignments[${container.id}][vehicle_number]" placeholder="Enter or search vehicle number..." onkeyup="searchVendorVehicles(this, 'assignments[${container.id}][vendor_vehicle_id]'); formatVehicleNumber(this)" onblur="formatVehicleNumber(this)" disabled>
                                         <input type="hidden" name="assignments[${container.id}][vendor_vehicle_id]">
                                         <div class="search-dropdown"></div>
                                     </div>
@@ -2699,7 +2677,7 @@ function loadVehicleAssignmentForms(bookingId) {
             if (helpText) helpText.textContent = 'Search and select an owned vehicle from the dropdown.';
         } else if (selectElement.value === 'vendor') {
             if (vendorSection) vendorSection.style.display = 'block';
-            if (helpText) helpText.textContent = 'Select a vendor and enter vehicle details. You can search existing vendor vehicles or add a new one.';
+            if (helpText) helpText.textContent = 'Select a vendor and enter vehicle details. You can search existing vendor vehicles or enter a new vehicle number manually.';
         } else {
             if (helpText) helpText.textContent = 'Please select a vehicle type to continue.';
         }
@@ -2726,7 +2704,7 @@ function loadVehicleAssignmentForms(bookingId) {
                 rateInput.disabled = false;
             }
             if (helpText) {
-                helpText.textContent = 'Vendor selected. Now enter vehicle number and rate.';
+                helpText.textContent = 'Vendor selected. Enter vehicle number (search existing or type new) and rate.';
             }
         } else {
             // Disable fields if no vendor selected
@@ -2742,6 +2720,14 @@ function loadVehicleAssignmentForms(bookingId) {
             if (helpText) {
                 helpText.textContent = 'Select a vendor first to enable vehicle and rate fields.';
             }
+        }
+    }
+
+    // Format vehicle number to CAPS and remove spaces
+    function formatVehicleNumber(input) {
+        if (input.value) {
+            const formatted = input.value.toUpperCase().replace(/\s+/g, '');
+            input.value = formatted;
         }
     }
 
@@ -2882,7 +2868,16 @@ function showSearchResults(input, data, hiddenFieldName, type) {
     if (data.error) {
         dropdown.innerHTML = `<div class="search-dropdown-item text-red-500">Error: ${data.error}</div>`;
     } else if (data.length === 0) {
-        dropdown.innerHTML = '<div class="search-dropdown-item text-gray-500">No results found</div>';
+        if (type === 'vendor_vehicle') {
+            dropdown.innerHTML = `
+                <div class="search-dropdown-item text-gray-500">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    No existing vehicles found. You can enter a new vehicle number manually.
+                </div>
+            `;
+        } else {
+            dropdown.innerHTML = '<div class="search-dropdown-item text-gray-500">No results found</div>';
+        }
     } else {
         let html = '';
         data.forEach(item => {

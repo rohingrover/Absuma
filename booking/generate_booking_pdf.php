@@ -19,11 +19,22 @@ if (!$bookingId) {
 }
 
 // Fetch booking with joins
-$sql = "SELECT b.*, c.client_name, c.client_code, c.contact_person as client_contact, c.phone_number as client_phone, c.email_address as client_email, c.billing_address as client_address, fl.location AS from_location, tl.location AS to_location, u.full_name AS created_by_name
+$sql = "SELECT b.*, c.client_name, c.client_code, c.contact_person as client_contact, c.phone_number as client_phone, c.email_address as client_email, c.billing_address as client_address, 
+        CASE 
+            WHEN b.from_location_type = 'yard' THEN yfl.yard_name
+            ELSE fl.location
+        END as from_location,
+        CASE 
+            WHEN b.to_location_type = 'yard' THEN ytl.yard_name
+            ELSE tl.location
+        END as to_location,
+        u.full_name AS created_by_name
         FROM bookings b
         LEFT JOIN clients c ON b.client_id = c.id
-        LEFT JOIN location fl ON b.from_location_id = fl.id
-        LEFT JOIN location tl ON b.to_location_id = tl.id
+        LEFT JOIN location fl ON b.from_location_id = fl.id AND b.from_location_type = 'location'
+        LEFT JOIN location tl ON b.to_location_id = tl.id AND b.to_location_type = 'location'
+        LEFT JOIN yard_locations yfl ON b.from_location_id = yfl.id AND b.from_location_type = 'yard'
+        LEFT JOIN yard_locations ytl ON b.to_location_id = ytl.id AND b.to_location_type = 'yard'
         LEFT JOIN users u ON b.created_by = u.id
         WHERE b.booking_id = ?";
 $stmt = $pdo->prepare($sql);
@@ -49,10 +60,20 @@ try {
         $hasPerContainerLoc = in_array('from_location_id', $bcCols, true) && in_array('to_location_id', $bcCols, true);
 
         if ($hasPerContainerLoc) {
-            $c = $pdo->prepare("SELECT bc.*, fl.location AS from_location_name, tl.location AS to_location_name
+            $c = $pdo->prepare("SELECT bc.*, 
+                                 CASE 
+                                     WHEN bc.from_location_type = 'yard' THEN yfl.yard_name
+                                     ELSE fl.location
+                                 END as from_location_name,
+                                 CASE 
+                                     WHEN bc.to_location_type = 'yard' THEN ytl.yard_name
+                                     ELSE tl.location
+                                 END as to_location_name
                                  FROM booking_containers bc
-                                 LEFT JOIN location fl ON bc.from_location_id = fl.id
-                                 LEFT JOIN location tl ON bc.to_location_id = tl.id
+                                 LEFT JOIN location fl ON bc.from_location_id = fl.id AND bc.from_location_type = 'location'
+                                 LEFT JOIN location tl ON bc.to_location_id = tl.id AND bc.to_location_type = 'location'
+                                 LEFT JOIN yard_locations yfl ON bc.from_location_id = yfl.id AND bc.from_location_type = 'yard'
+                                 LEFT JOIN yard_locations ytl ON bc.to_location_id = ytl.id AND bc.to_location_type = 'yard'
                                  WHERE bc.booking_id = ?
                                  ORDER BY bc.container_sequence");
         } else {
@@ -546,6 +567,23 @@ try {
                     <span class="info-label">Last Updated:</span>
                     <span class="info-value"><?= isset($booking['updated_at']) && $booking['updated_at'] ? date('d-M-Y g:i A', strtotime($booking['updated_at'])) : 'Never' ?></span>
                 </div>
+                <div class="info-item">
+                    <span class="info-label">Movement Type:</span>
+                    <span class="info-value">
+                    <?php 
+                    $movement_type = $booking['movement_type'] ?? '';
+                    $display_type = '';
+                    switch($movement_type) {
+                        case 'import': $display_type = 'Import'; break;
+                        case 'export': $display_type = 'Export'; break;
+                        case 'port_yard_movement': $display_type = 'Port/Yard Movement'; break;
+                        case 'domestic_movement': $display_type = 'Domestic Movement'; break;
+                        default: $display_type = 'Not specified';
+                    }
+                    echo htmlspecialchars($display_type);
+                    ?>
+                    </span>
+                </div>
             </div>
             <?php if ($showMainRoute): ?>
             <div class="info-item" style="grid-column: 1 / -1;">
@@ -556,6 +594,16 @@ try {
                     <strong><?= $booking['to_location'] ? htmlspecialchars($booking['to_location']) : 'N/A' ?></strong>
                 </span>
             </div>
+            <?php if (!empty($booking['booking_receipt_pdf'])): ?>
+            <div class="info-item" style="grid-column: 1 / -1;">
+                <span class="info-label">Booking Receipt:</span>
+                <span class="info-value">
+                    <a href="../Uploads/booking_docs/<?= htmlspecialchars($booking['booking_receipt_pdf']) ?>" target="_blank" style="color: #0d9488; text-decoration: underline; font-weight: bold;">
+                        View Original Receipt PDF
+                    </a>
+                </span>
+            </div>
+            <?php endif; ?>
             <?php endif; ?>
         </div>
 
@@ -712,10 +760,29 @@ $message .= "*Booking ID:* " . htmlspecialchars($booking['booking_id']) . "\n";
 $message .= "*Client:* " . htmlspecialchars($booking['client_name']) . "\n";
 $message .= "*Client ID:* " . htmlspecialchars($booking['client_code'] ?? 'N/A') . "\n";
 $message .= "*Date:* " . date('d M Y', strtotime($booking['created_at'])) . "\n";
+
+// Add movement type
+$movement_type = $booking['movement_type'] ?? '';
+$display_type = '';
+switch($movement_type) {
+    case 'import': $display_type = 'Import'; break;
+    case 'export': $display_type = 'Export'; break;
+    case 'port_yard_movement': $display_type = 'Port/Yard Movement'; break;
+    case 'domestic_movement': $display_type = 'Domestic Movement'; break;
+    default: $display_type = 'Not specified';
+}
+$message .= "*Movement Type:* " . $display_type . "\n";
+
 $message .= "*Route:* " . htmlspecialchars($booking['from_location'] ?? 'N/A') . " → " . htmlspecialchars($booking['to_location'] ?? 'N/A') . "\n";
 
 if (!empty($containers)) {
     $message .= "*Total Containers:* " . count($containers) . "\n";
+    
+    // Add container details
+    $message .= "\n*Container Details:*\n";
+    foreach ($containers as $idx => $container) {
+        $message .= ($idx + 1) . ". " . ($container['container_type'] ?? 'N/A') . " - " . ($container['container_number_1'] ?? 'N/A') . "\n";
+    }
 }
 
 $message .= "\n*PDF Link:*\n";

@@ -69,77 +69,126 @@ function getRequiredApprovalRole($user_role) {
 
 // Function to determine initial booking status
 function getInitialStatus($user_role, $booking_id, $pdo) {
-    if (needsApproval($user_role, $booking_id, $pdo)) {
-        return 'pending_approval';
-    } else {
-        return 'pending'; // Ready for L2 to work on
-    }
+    // Normalize to existing workflow statuses used across the app
+    // Approvals (if any) are tracked via requires_approval/required_approval_role fields
+    return 'pending';
 }
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    error_log("Form submission received");
+    error_log("POST data: " . print_r($_POST, true));
     try {
         $client_id = isset($_POST['client_id']) ? (int)$_POST['client_id'] : 0;
         $no_of_containers = isset($_POST['no_of_containers']) ? (int)$_POST['no_of_containers'] : 0;
+        $movement_type = isset($_POST['movement_type']) ? trim($_POST['movement_type']) : '';
         $container_types = $_POST['container_types'] ?? [];
         $container_numbers = $_POST['container_numbers'] ?? [];
         $container_from_location_ids = $_POST['container_from_location_ids'] ?? [];
         $container_to_location_ids = $_POST['container_to_location_ids'] ?? [];
         $same_locations_all = isset($_POST['same_locations_all']) ? 1 : 0;
         
+        // Handle PDF file upload
+        $booking_receipt_pdf = null;
+        $upload_error = '';
+        
+        
+        
+        if (isset($_FILES['booking_receipt_pdf']) && $_FILES['booking_receipt_pdf']['error'] !== UPLOAD_ERR_NO_FILE) {
+            
+            if ($_FILES['booking_receipt_pdf']['error'] === UPLOAD_ERR_OK) {
+                $upload_dir = __DIR__ . '/../Uploads/booking_docs/';
+                
+                // Create directory if it doesn't exist
+                if (!is_dir($upload_dir)) {
+                    if (!mkdir($upload_dir, 0755, true)) {
+                        $upload_error = 'Failed to create upload directory';
+                    }
+                }
+                
+                if (empty($upload_error)) {
+                    $file_extension = strtolower(pathinfo($_FILES['booking_receipt_pdf']['name'], PATHINFO_EXTENSION));
+                    
+                    if ($file_extension === 'pdf') {
+                        $file_name = 'booking_receipt_' . time() . '_' . uniqid() . '.pdf';
+                        $file_path = $upload_dir . $file_name;
+                        
+                        if (move_uploaded_file($_FILES['booking_receipt_pdf']['tmp_name'], $file_path)) {
+                            $booking_receipt_pdf = $file_name;
+                        } else {
+                            $upload_error = 'Failed to move uploaded file';
+                        }
+                    } else {
+                        $upload_error = 'Only PDF files are allowed';
+                    }
+                }
+            } else {
+                $upload_error = 'File upload error: ' . $_FILES['booking_receipt_pdf']['error'];
+            }
+        }
+        
         // Normalize optional FK fields to NULL when empty
         // Handle both regular locations (loc_X) and yard locations (yard_X)
         $from_location_id = null;
+        $from_location_type = null;
         if (isset($_POST['from_location_id']) && $_POST['from_location_id'] !== '') {
             $from_location_value = $_POST['from_location_id'];
             if (strpos($from_location_value, 'loc_') === 0) {
                 // Regular location: extract the ID
                 $from_location_id = (int)substr($from_location_value, 4);
+                $from_location_type = 'location';
             } elseif (strpos($from_location_value, 'yard_') === 0) {
-                // Yard location: get the associated location_id from yard_locations table
+                // Yard location: store the yard ID directly
                 $yard_id = (int)substr($from_location_value, 5);
-                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
-                $yard_stmt->execute([$yard_id]);
-                $yard_result = $yard_stmt->fetch();
-                if ($yard_result) {
-                    $from_location_id = (int)$yard_result['location_id'];
-                }
+                $from_location_id = $yard_id;
+                $from_location_type = 'yard';
             } else {
                 // Fallback: try to cast as integer (legacy support)
                 $from_location_id = (int)$from_location_value;
+                $from_location_type = 'location'; // Assume regular location for legacy
             }
         }
         
         $to_location_id = null;
+        $to_location_type = null;
         if (isset($_POST['to_location_id']) && $_POST['to_location_id'] !== '') {
             $to_location_value = $_POST['to_location_id'];
             if (strpos($to_location_value, 'loc_') === 0) {
                 // Regular location: extract the ID
                 $to_location_id = (int)substr($to_location_value, 4);
+                $to_location_type = 'location';
             } elseif (strpos($to_location_value, 'yard_') === 0) {
-                // Yard location: get the associated location_id from yard_locations table
+                // Yard location: store the yard ID directly
                 $yard_id = (int)substr($to_location_value, 5);
-                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
-                $yard_stmt->execute([$yard_id]);
-                $yard_result = $yard_stmt->fetch();
-                if ($yard_result) {
-                    $to_location_id = (int)$yard_result['location_id'];
-                }
+                $to_location_id = $yard_id;
+                $to_location_type = 'yard';
             } else {
                 // Fallback: try to cast as integer (legacy support)
                 $to_location_id = (int)$to_location_value;
+                $to_location_type = 'location'; // Assume regular location for legacy
             }
         }
             
-        // Read booking id from visible or hidden field
+        // Read booking id from form
         $booking_id = trim($_POST['booking_id'] ?? '');
-        if ($booking_id === '' && isset($_POST['booking_id_hidden'])) {
-            $booking_id = trim($_POST['booking_id_hidden']);
-        }
+        
+        // Debug: Log location values
+        error_log("From location: ID=$from_location_id, Type=$from_location_type");
+        error_log("To location: ID=$to_location_id, Type=$to_location_type");
         
         // Validate booking ID
         if (empty($booking_id)) {
             throw new Exception("Booking ID is required");
+        }
+        
+        // Validate movement type
+        if (empty($movement_type)) {
+            throw new Exception("Movement Type is required");
+        }
+        
+        $valid_movement_types = ['import', 'export', 'port_yard_movement', 'domestic_movement'];
+        if (!in_array($movement_type, $valid_movement_types)) {
+            throw new Exception("Invalid movement type selected");
         }
         
         // Check if booking ID already exists
@@ -169,18 +218,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $columnsStmt = $pdo->query("SHOW COLUMNS FROM bookings");
             $existingColumns = $columnsStmt->fetchAll(PDO::FETCH_COLUMN, 0);
 
-            $insertColumns = ['booking_id','client_id','no_of_containers','from_location_id','to_location_id','status','created_by','updated_by'];
-            $placeholders = ['?','?','?','?','?','?','?','?'];
+            $insertColumns = ['booking_id','client_id','no_of_containers','movement_type','from_location_id','from_location_type','to_location_id','to_location_type','status','created_by','updated_by'];
+            $placeholders = ['?','?','?','?','?','?','?','?','?','?','?'];
             $params = [
                 $booking_id,
                 $client_id,
                 $no_of_containers,
+                $movement_type,
                 $from_location_id,
+                $from_location_type,
                 $to_location_id,
+                $to_location_type,
                 $initial_status,
                 $_SESSION['user_id'],
                 $_SESSION['user_id']
             ];
+            
+            // Add booking receipt PDF if uploaded
+            if ($booking_receipt_pdf) {
+                $insertColumns[] = 'booking_receipt_pdf';
+                $placeholders[] = '?';
+                $params[] = $booking_receipt_pdf;
+            }
 
             // Add approval-related fields if they exist
             if (in_array('requires_approval', $existingColumns, true)) {
@@ -208,13 +267,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
 
             $sql = 'INSERT INTO bookings (' . implode(', ', $insertColumns) . ') VALUES (' . implode(', ', $placeholders) . ')';
+            error_log("SQL: " . $sql);
+            error_log("Params: " . print_r($params, true));
+            
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             
             $booking_db_id = $pdo->lastInsertId();
+            error_log("Booking created with ID: " . $booking_db_id);
             
             // Insert individual container records (only if table exists)
-            if ($hasContainersTable && !empty($container_types)) {
+            if ($hasContainersTable && $no_of_containers > 0) {
                 // Detect optional per-container location columns
                 $bcColumns = [];
                 try {
@@ -236,8 +299,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 if ($hasPerContainerLocations) {
                     $container_stmt_any = $pdo->prepare("
-                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, to_location_id) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, from_location_type, to_location_id, to_location_type) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ");
                 } else {
                     $container_stmt_any = $pdo->prepare("
@@ -247,7 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 }
 
                 $number_index = 0;
-                $insertCount = max((int)$no_of_containers, count($container_types), count($container_from_location_ids), count($container_to_location_ids));
+                $insertCount = (int)$no_of_containers; // Use the actual number of containers
                 for ($i = 0; $i < $insertCount; $i++) {
                     $sequence = $i + 1;
 
@@ -265,23 +328,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                     // Determine per-container locations
                     $container_from_id = null;
+                    $container_from_type = null;
                     $container_to_id = null;
+                    $container_to_type = null;
                     if ($hasPerContainerLocations) {
                         // Handle container from location
                         if (isset($container_from_location_ids[$i]) && $container_from_location_ids[$i] !== '') {
                             $container_from_value = $container_from_location_ids[$i];
                             if (strpos($container_from_value, 'loc_') === 0) {
                                 $container_from_id = (int)substr($container_from_value, 4);
+                                $container_from_type = 'location';
                             } elseif (strpos($container_from_value, 'yard_') === 0) {
                                 $yard_id = (int)substr($container_from_value, 5);
-                                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
-                                $yard_stmt->execute([$yard_id]);
-                                $yard_result = $yard_stmt->fetch();
-                                if ($yard_result) {
-                                    $container_from_id = (int)$yard_result['location_id'];
-                                }
+                                $container_from_id = $yard_id;
+                                $container_from_type = 'yard';
                             } else {
                                 $container_from_id = (int)$container_from_value;
+                                $container_from_type = 'location';
                             }
                         }
                         
@@ -290,16 +353,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $container_to_value = $container_to_location_ids[$i];
                             if (strpos($container_to_value, 'loc_') === 0) {
                                 $container_to_id = (int)substr($container_to_value, 4);
+                                $container_to_type = 'location';
                             } elseif (strpos($container_to_value, 'yard_') === 0) {
                                 $yard_id = (int)substr($container_to_value, 5);
-                                $yard_stmt = $pdo->prepare("SELECT location_id FROM yard_locations WHERE id = ? AND is_active = 1");
-                                $yard_stmt->execute([$yard_id]);
-                                $yard_result = $yard_stmt->fetch();
-                                if ($yard_result) {
-                                    $container_to_id = (int)$yard_result['location_id'];
-                                }
+                                $container_to_id = $yard_id;
+                                $container_to_type = 'yard';
                             } else {
                                 $container_to_id = (int)$container_to_value;
+                                $container_to_type = 'location';
                             }
                         }
                         
@@ -333,7 +394,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             $number1,
                             $number2,
                             $container_from_id,
-                            $container_to_id
+                            $container_from_type,
+                            $container_to_id,
+                            $container_to_type
                         ]);
                     } else {
                         $container_stmt_any->execute([
@@ -350,23 +413,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             // Commit transaction
             $pdo->commit();
             
+            // Create appropriate success message based on status
+            if ($initial_status === 'pending_approval') {
+                $success_message = "Booking created successfully! Booking ID: " . $booking_id . 
+                                 " - Status: Pending Approval (Requires approval from " . ucfirst(str_replace('_', ' ', $required_approval_role)) . " or above)";
+            } else {
+                $success_message = "Booking created successfully! Booking ID: " . $booking_id . 
+                                 " - Status: Ready for L2 Supervisor to work on";
+            }
+            
+            if ($booking_receipt_pdf) {
+                $success_message .= " | PDF uploaded: " . htmlspecialchars($booking_receipt_pdf);
+            }
+            if ($upload_error) {
+                $success_message .= " | Upload warning: " . htmlspecialchars($upload_error);
+            }
+            
+            
+            // Clear form data
+            $_POST = array();
+            
         } catch (Exception $e) {
             // Rollback transaction on error
             $pdo->rollback();
-            throw $e;
+            $error_message = "Error creating booking: " . $e->getMessage();
         }
-        
-        // Create appropriate success message based on status
-        if ($initial_status === 'pending_approval') {
-            $success_message = "Booking created successfully! Booking ID: " . $booking_id . 
-                             " - Status: Pending Approval (Requires approval from " . ucfirst(str_replace('_', ' ', $required_approval_role)) . " or above)";
-        } else {
-            $success_message = "Booking created successfully! Booking ID: " . $booking_id . 
-                             " - Status: Ready for L2 Supervisor to work on";
-        }
-        
-        // Clear form data
-        $_POST = array();
         
     } catch (Exception $e) {
         $error_message = "Error creating booking: " . $e->getMessage();
@@ -383,20 +454,22 @@ $location_results = $locations_stmt->fetchAll();
 foreach ($location_results as $loc) {
     $locations[] = [
         'id' => 'loc_' . $loc['id'],
-        'location' => $loc['location'],
-        'source' => 'location'
+        'location' => $loc['location'] . ' (Location)',
+        'source' => 'location',
+        'original_name' => $loc['location']
     ];
 }
 
 // Get from yard_locations table (only active ones)
 try {
-    $yard_stmt = $pdo->query("SELECT id, yard_name as location, 'yard' as source FROM yard_locations WHERE is_active = 1 ORDER BY yard_name");
+    $yard_stmt = $pdo->query("SELECT id, yard_name FROM yard_locations WHERE is_active = 1 ORDER BY yard_name");
     $yard_results = $yard_stmt->fetchAll();
     foreach ($yard_results as $yard) {
         $locations[] = [
             'id' => 'yard_' . $yard['id'],
-            'location' => $yard['location'],
-            'source' => 'yard'
+            'location' => $yard['yard_name'] . ' (Yard)',
+            'source' => 'yard',
+            'original_name' => $yard['yard_name']
         ];
     }
 } catch (PDOException $e) {
@@ -405,30 +478,48 @@ try {
 
 // Function to generate next booking ID
 function generateNextBookingId($pdo) {
-    $current_year = date('Y');
-    $prefix = "AB-{$current_year}-";
-    
-    // Get the last booking ID with this prefix
-    $stmt = $pdo->prepare("SELECT booking_id FROM bookings WHERE booking_id LIKE ? ORDER BY booking_id DESC LIMIT 1");
-    $stmt->execute([$prefix . '%']);
-    $last_booking = $stmt->fetch();
-    
-    if ($last_booking) {
-        // Extract the number part and increment
-        $last_number = intval(substr($last_booking['booking_id'], strlen($prefix)));
-        $next_number = $last_number + 1;
-    } else {
-        // First booking of the year
-        $next_number = 1;
+    try {
+        $current_year = date('Y');
+        $prefix = "AB-{$current_year}-";
+        
+        // Get the last booking ID with this prefix
+        $stmt = $pdo->prepare("SELECT booking_id FROM bookings WHERE booking_id LIKE ? ORDER BY booking_id DESC LIMIT 1");
+        $stmt->execute([$prefix . '%']);
+        $last_booking = $stmt->fetch();
+        
+        if ($last_booking) {
+            // Extract the number part and increment
+            $last_number = intval(substr($last_booking['booking_id'], strlen($prefix)));
+            $next_number = $last_number + 1;
+        } else {
+            // First booking of the year
+            $next_number = 1;
+        }
+        
+        $booking_id = $prefix . str_pad($next_number, 3, '0', STR_PAD_LEFT);
+        
+        // Validate the generated booking ID
+        if (empty($booking_id) || strlen($booking_id) < 8) {
+            throw new Exception("Generated booking ID is invalid: " . $booking_id);
+        }
+        
+        return $booking_id;
+    } catch (Exception $e) {
+        error_log("Error in generateNextBookingId: " . $e->getMessage());
+        throw new Exception("Failed to generate booking ID: " . $e->getMessage());
     }
-    
-    return $prefix . str_pad($next_number, 3, '0', STR_PAD_LEFT);
 }
 
 // Handle AJAX request for generating booking ID
 if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
     header('Content-Type: application/json');
-    echo json_encode(['booking_id' => generateNextBookingId($pdo)]);
+    try {
+        $booking_id = generateNextBookingId($pdo);
+        echo json_encode(['booking_id' => $booking_id]);
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+    }
     exit();
 }
 ?>
@@ -794,43 +885,55 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                             </div>
                         </div>
                         
-                        <!-- Booking ID Input Section -->
-                        <div class="mt-4 p-4 bg-gradient-to-r from-teal-50 to-teal-100 rounded-lg border border-teal-200">
-                            <div class="flex items-center gap-3 mb-4">
-                                <div class="w-10 h-10 bg-teal-600 text-white rounded-full flex items-center justify-center">
-                                    <i class="fas fa-hashtag text-sm"></i>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-gray-600">Booking ID</p>
-                                    <p class="text-xs text-gray-500">Enter manually or generate automatically</p>
-                                </div>
-                            </div>
-                            
-                            <div class="flex gap-3">
-                                <div class="flex-1">
-                                    <input type="text" 
-                                           name="booking_id" 
-                                           id="booking_id" 
-                                           class="input-enhanced" 
-                                           placeholder="Enter booking ID"
-                                           value="<?= htmlspecialchars($_POST['booking_id'] ?? '') ?>"
-                                           maxlength="50"
-                                           required>
-                                </div>
-                                <button type="button" 
-                                        id="generate-booking-id-btn"
-                                        class="generate-btn bg-teal-600 hover:bg-teal-700 text-white px-4 py-3 rounded-lg shadow-md flex items-center gap-2">
-                                    <i class="fas fa-magic"></i>
-                                    <span class="hidden sm:inline">Generate</span>
-                                </button>
-                            </div>
-                        </div>
                     </div>
 
                     <!-- Booking Form -->
                     <div class="form-section fade-in-up">
-                        <form method="POST" class="space-y-6">
-                            <input type="hidden" name="booking_id" id="booking_id_hidden">
+                        <form method="POST" enctype="multipart/form-data" class="space-y-6">
+                            <!-- Booking ID Input Section -->
+                            <div class="mt-4 p-4 bg-gradient-to-r from-teal-50 to-teal-100 rounded-lg border border-teal-200">
+                                <div class="flex items-center gap-3 mb-4">
+                                    <div class="w-10 h-10 bg-teal-600 text-white rounded-full flex items-center justify-center">
+                                        <i class="fas fa-hashtag text-sm"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-600">Booking ID</p>
+                                        <p class="text-xs text-gray-500">Enter manually or generate automatically</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex gap-3">
+                                    <div class="flex-1">
+                                        <input type="text" 
+                                               name="booking_id" 
+                                               id="booking_id" 
+                                               class="input-enhanced" 
+                                               placeholder="Enter booking ID"
+                                               value="<?= htmlspecialchars($_POST['booking_id'] ?? '') ?>"
+                                               maxlength="50"
+                                               required>
+                                    </div>
+                                    <button type="button" 
+                                            id="generate-booking-id-btn"
+                                            class="generate-btn bg-teal-600 hover:bg-teal-700 text-white px-4 py-3 rounded-lg shadow-md flex items-center gap-2">
+                                        <i class="fas fa-magic"></i>
+                                        <span class="hidden sm:inline">Generate</span>
+                                    </button>
+                                </div>
+                                
+                                <!-- Approval Preview Section -->
+                                <div id="approval-preview" class="hidden mt-4 p-4 rounded-lg border">
+                                    <div class="flex items-start gap-3">
+                                        <div class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center">
+                                            <i class="fas fa-info text-sm"></i>
+                                        </div>
+                                        <div class="flex-1">
+                                            <h4 class="text-sm font-semibold text-gray-800 mb-1">Booking Status Preview</h4>
+                                            <p id="approval-preview-text" class="text-sm text-gray-600"></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             
                             <!-- Basic Information Section -->
                             <div class="form-section-header">
@@ -840,8 +943,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                 <h2 class="form-section-title">Basic Information</h2>
                             </div>
                             
-                            <!-- Client and Number of Containers in Same Row -->
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <!-- Client, Movement Type and Number of Containers -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                                 <!-- Client Selection with Autocomplete -->
                                 <div>
                                     <label for="client_search" class="form-label">
@@ -867,6 +970,24 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                             Start typing to see client suggestions
                                         </div>
                                     </div>
+                                </div>
+
+                                <!-- Movement Type -->
+                                <div>
+                                    <label for="movement_type" class="form-label">
+                                        <i class="fas fa-truck text-teal-600 mr-2"></i>Movement Type *
+                                    </label>
+                                    <select name="movement_type" id="movement_type" class="input-enhanced" required>
+                                        <option value="">Select Movement Type</option>
+                                        <option value="import" <?= ($_POST['movement_type'] ?? '') === 'import' ? 'selected' : '' ?>>Import</option>
+                                        <option value="export" <?= ($_POST['movement_type'] ?? '') === 'export' ? 'selected' : '' ?>>Export</option>
+                                        <option value="port_yard_movement" <?= ($_POST['movement_type'] ?? '') === 'port_yard_movement' ? 'selected' : '' ?>>Port/Yard Movement</option>
+                                        <option value="domestic_movement" <?= ($_POST['movement_type'] ?? '') === 'domestic_movement' ? 'selected' : '' ?>>Domestic Movement</option>
+                                    </select>
+                                    <p class="text-xs text-gray-500 mt-2 flex items-center">
+                                        <i class="fas fa-info-circle mr-1"></i>
+                                        Select the type of container movement
+                                    </p>
                                 </div>
 
                                 <!-- Number of Containers -->
@@ -961,6 +1082,35 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                 </div>
                             </div>
 
+                            <!-- PDF Upload Section -->
+                            <div class="form-section-header">
+                                <div class="form-section-icon">
+                                    <i class="fas fa-file-pdf"></i>
+                                </div>
+                                <h2 class="form-section-title">Booking Receipt PDF <span class="text-sm font-normal text-gray-500">(Optional)</span></h2>
+                            </div>
+                            
+                            <div class="bg-white rounded-lg p-4 border border-gray-200 shadow-sm">
+                                <div class="flex items-center justify-center w-full">
+                                    <div class="w-full">
+                                        <label for="booking_receipt_pdf" class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors duration-200">
+                                            <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                                                <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i>
+                                                <p class="mb-2 text-sm text-gray-500">
+                                                    <span class="font-semibold">Click to upload</span> or drag and drop
+                                                </p>
+                                                <p class="text-xs text-gray-500">PDF files only (MAX. 10MB)</p>
+                                            </div>
+                                        </label>
+                                        <input id="booking_receipt_pdf" name="booking_receipt_pdf" type="file" accept=".pdf" class="mt-2 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100" />
+                                    </div>
+                                </div>
+                                <div class="mt-3 text-xs text-gray-500 flex items-center">
+                                    <i class="fas fa-info-circle mr-1"></i>
+                                    Upload the booking receipt PDF document (optional)
+                                </div>
+                            </div>
+
                             
 
                             <!-- Container Details Section (Optional) -->
@@ -1044,6 +1194,12 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
     function previewApprovalRequirements(bookingId) {
         const previewDiv = document.getElementById('approval-preview');
         const previewText = document.getElementById('approval-preview-text');
+        
+        // Check if elements exist
+        if (!previewDiv || !previewText) {
+            console.warn('Approval preview elements not found');
+            return;
+        }
         
         if (!bookingId || bookingId.trim() === '') {
             previewDiv.classList.add('hidden');
@@ -1227,28 +1383,81 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
             return;
         }
             
-        input.addEventListener('input', function() {
-            const query = this.value.toLowerCase().trim();
-            
-            // Clear hidden input if search is empty
-            if (!query || query.trim().length === 0) {
-                hidden.value = '';
-            }
+        // Show dropdown on focus/click
+        function showDropdown() {
+            console.log('Showing dropdown for', inputId);
+            const query = input.value.toLowerCase().trim();
             
             const filtered = locations.filter(loc => 
-                loc.location.toLowerCase().includes(query)
+                !query || 
+                loc.location.toLowerCase().includes(query) || 
+                (loc.original_name && loc.original_name.toLowerCase().includes(query))
             );
+            
+            console.log('Showing', filtered.length, 'locations in dropdown');
             
             if (filtered.length > 0) {
                 dropdown.innerHTML = filtered.map(loc => 
                     `<div class="autocomplete-item p-3 cursor-pointer hover:bg-teal-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
-                        <div class="font-medium text-gray-900">${loc.location}</div>
+                        <div class="font-medium text-gray-900">${loc.original_name || loc.location}</div>
+                        <div class="text-sm text-gray-500">${String(loc.source) === 'location' ? 'Location' : 'Yard Location'}</div>
                     </div>`
                 ).join('');
+                dropdown.style.display = 'block';
+                dropdown.style.position = 'absolute';
+                dropdown.style.zIndex = '9999';
+                dropdown.style.backgroundColor = 'white';
+                dropdown.style.border = '1px solid #ccc';
+                dropdown.style.borderRadius = '4px';
+                dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                dropdown.style.maxHeight = '200px';
+                dropdown.style.overflowY = 'auto';
+                dropdown.style.width = input.offsetWidth + 'px';
+            }
+        }
+        
+        input.addEventListener('focus', showDropdown);
+        input.addEventListener('click', showDropdown);
+        
+        input.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            console.log('Input event triggered for', inputId, 'with query:', query);
+            
+            // Clear hidden input if search is empty
+            if (!query || query.trim().length === 0) {
+                hidden.value = '';
+                dropdown.style.display = 'none';
+                return;
+            }
+            
+            const filtered = locations.filter(loc => 
+                loc.location.toLowerCase().includes(query) || 
+                (loc.original_name && loc.original_name.toLowerCase().includes(query))
+            );
+            
+            console.log('Filtered results:', filtered.length, filtered.map(l => l.original_name + ' (' + l.source + ')'));
+            
+            if (filtered.length > 0) {
+                dropdown.innerHTML = filtered.map(loc => 
+                    `<div class="autocomplete-item p-3 cursor-pointer hover:bg-teal-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
+                        <div class="font-medium text-gray-900">${loc.original_name || loc.location}</div>
+                        <div class="text-sm text-gray-500">${String(loc.source) === 'location' ? 'Location' : 'Yard Location'}</div>
+                    </div>`
+                ).join('');
+                dropdown.style.display = 'block';
+                dropdown.style.position = 'absolute';
+                dropdown.style.zIndex = '9999';
+                dropdown.style.backgroundColor = 'white';
+                dropdown.style.border = '1px solid #ccc';
+                dropdown.style.borderRadius = '4px';
+                dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                dropdown.style.maxHeight = '200px';
+                dropdown.style.overflowY = 'auto';
+                dropdown.style.width = input.offsetWidth + 'px';
             } else {
                 dropdown.innerHTML = '<div class="p-3 text-gray-500 text-sm">No locations found</div>';
+                dropdown.style.display = 'block';
             }
-            dropdown.style.display = 'block';
         });
         
         dropdown.addEventListener('click', function(e) {
@@ -1344,6 +1553,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                             '<input type="hidden" name="container_from_location_ids[]" id="container_from_location_id_' + i + '" />' +
                             '<div class="autocomplete-dropdown" id="container_from_location_dropdown_' + i + '"></div>' +
                         '</div>' +
+                        '<div class="mt-1 text-xs text-gray-500">' +
+                            '<i class="fas fa-info-circle mr-1"></i>' +
+                            'Search locations and yard locations' +
+                        '</div>' +
                     '</div>' +
                     '<div>' +
                         '<label class="block text-sm font-medium text-gray-700 mb-1">To Location (Optional)</label>' +
@@ -1354,6 +1567,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                             '</div>' +
                             '<input type="hidden" name="container_to_location_ids[]" id="container_to_location_id_' + i + '" />' +
                             '<div class="autocomplete-dropdown" id="container_to_location_dropdown_' + i + '"></div>' +
+                        '</div>' +
+                        '<div class="mt-1 text-xs text-gray-500">' +
+                            '<i class="fas fa-info-circle mr-1"></i>' +
+                            'Search locations and yard locations' +
                         '</div>' +
                     '</div>' +
                 '</div>' +
@@ -1443,9 +1660,90 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         }
     }
 
+    // PDF Upload Handler
+    function setupPDFUpload() {
+        const fileInput = document.getElementById('booking_receipt_pdf');
+        const uploadArea = fileInput ? fileInput.closest('div').querySelector('label') : null;
+        
+        console.log('PDF Upload Setup - fileInput:', fileInput);
+        console.log('PDF Upload Setup - uploadArea:', uploadArea);
+        
+        if (fileInput && uploadArea) {
+            // Handle file selection
+            fileInput.addEventListener('change', function(e) {
+                console.log('PDF Upload - File change event triggered');
+                console.log('PDF Upload - Files:', e.target.files);
+                
+                const file = e.target.files[0];
+                if (file) {
+                    console.log('PDF Upload - File selected:', file.name, 'Size:', file.size, 'Type:', file.type);
+                    
+                    // Validate file type
+                    if (file.type !== 'application/pdf') {
+                        console.log('PDF Upload - Invalid file type:', file.type);
+                        alert('Please select a PDF file only.');
+                        fileInput.value = '';
+                        return;
+                    }
+                    
+                    // Validate file size (10MB)
+                    if (file.size > 10 * 1024 * 1024) {
+                        console.log('PDF Upload - File too large:', file.size);
+                        alert('File size must be less than 10MB.');
+                        fileInput.value = '';
+                        return;
+                    }
+                    
+                    console.log('PDF Upload - File validation passed');
+                    
+                    // Update upload area to show selected file
+                    uploadArea.innerHTML = `
+                        <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                            <i class="fas fa-file-pdf text-3xl text-red-500 mb-2"></i>
+                            <p class="mb-2 text-sm text-gray-700 font-semibold">${file.name}</p>
+                            <p class="text-xs text-gray-500">Click to change file</p>
+                        </div>
+                    `;
+                } else {
+                    console.log('PDF Upload - No file selected');
+                }
+            });
+            
+            // Handle click to open file dialog
+            uploadArea.addEventListener('click', function(e) {
+                e.preventDefault();
+                console.log('PDF Upload - Upload area clicked');
+                console.log('PDF Upload - Triggering file input click');
+                fileInput.click();
+            });
+            
+            // Handle drag and drop
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                uploadArea.classList.add('bg-blue-50', 'border-blue-400');
+            });
+            
+            uploadArea.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('bg-blue-50', 'border-blue-400');
+            });
+            
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('bg-blue-50', 'border-blue-400');
+                
+                const files = e.dataTransfer.files;
+                console.log('PDF Upload - Files dropped:', files.length);
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    fileInput.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+    }
+
     // Initialize everything when DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
-        console.log('DOM loaded, initializing all functionality...');
         
         // Initialize autocomplete for client field
         console.log('Setting up client autocomplete...');
@@ -1455,6 +1753,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         console.log('Setting up location autocomplete...');
         setupAutocomplete('from_location', 'from_location_dropdown', 'from_location_id');
         setupAutocomplete('to_location', 'to_location_dropdown', 'to_location_id');
+        
+        // Initialize PDF upload
+        console.log('Setting up PDF upload...');
+        setupPDFUpload();
     
         // Generate booking ID functionality
         const generateBtn = document.getElementById('generate-booking-id-btn');
@@ -1480,15 +1782,26 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                 button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span class="hidden sm:inline">Generating...</span>';
                 
                 // Fetch new booking ID
+                console.log('Making request to: ?action=generate_booking_id');
                 fetch('?action=generate_booking_id')
-                    .then(response => response.json())
+                    .then(response => {
+                        console.log('Response received:', response.status, response.statusText);
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
                     .then(data => {
+                        console.log('Data received:', data);
+                        if (data.error) {
+                            throw new Error(data.error);
+                        }
+                        if (!data.booking_id) {
+                            throw new Error('No booking ID returned from server');
+                        }
+                        
                         bookingIdInput.value = data.booking_id;
                         bookingIdInput.classList.add('booking-id-success');
-                        
-                        // Sync hidden field used for submission
-                        const hidden = document.getElementById('booking_id_hidden');
-                        if (hidden) hidden.value = data.booking_id;
                         
                         // Preview approval requirements for generated ID
                         previewApprovalRequirements(data.booking_id);
@@ -1500,7 +1813,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                     })
                     .catch(error => {
                         console.error('Error generating booking ID:', error);
-                        alert('Error generating booking ID. Please try again.');
+                        alert('Error generating booking ID: ' + error.message);
                     })
                     .finally(() => {
                         button.disabled = false;
@@ -1520,10 +1833,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
             applyGlobalLocationsToContainers();
         });
         
-        // Sync booking ID fields and preview approval requirements
+        // Preview approval requirements for booking ID
         document.getElementById('booking_id').addEventListener('input', function() {
             const bookingId = this.value;
-            document.getElementById('booking_id_hidden').value = bookingId;
             previewApprovalRequirements(bookingId);
         });
 
@@ -1536,7 +1848,56 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
         const toInput = document.getElementById('to_location');
         if (fromInput) fromInput.addEventListener('input', function(){ applyGlobalLocationsToContainers(); });
         if (toInput) toInput.addEventListener('input', function(){ applyGlobalLocationsToContainers(); });
+        
+        // Form validation and submission
+        const form = document.querySelector('form');
+        if (form) {
+            form.addEventListener('submit', function(e) {
+                console.log('Form submit event triggered');
+                const clientId = document.getElementById('client_id').value;
+                const noOfContainers = document.getElementById('no_of_containers').value;
+                const bookingId = document.getElementById('booking_id').value.trim();
+                
+                console.log('Form values:', { clientId, noOfContainers, bookingId });
+                
+                if (!clientId || !noOfContainers || !bookingId) {
+                    console.log('Form validation failed');
+                    e.preventDefault();
+                    showNotification('Please fill in all required fields including Booking ID.', 'error');
+                    return false;
+                }
+                
+                console.log('Form validation passed, submitting...');
+            });
+        }
     });
+
+    // Show notification function
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-sm transform transition-all duration-300 ${
+            type === 'error' ? 'bg-red-100 border border-red-300 text-red-800' : 
+            type === 'success' ? 'bg-green-100 border border-green-300 text-green-800' :
+            'bg-blue-100 border border-blue-300 text-blue-800'
+        }`;
+        
+        notification.innerHTML = `
+            <div class="flex items-center">
+                <i class="fas ${type === 'error' ? 'fa-exclamation-circle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'} mr-2"></i>
+                <span>${message}</span>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto remove after 5 seconds
+        setTimeout(() => {
+            notification.style.transform = 'translateX(100%)';
+            setTimeout(() => {
+                document.body.removeChild(notification);
+            }, 300);
+        }, 5000);
+    }
 
     // Location Modal Functions
     function openLocationModal(suggestedName = '') {

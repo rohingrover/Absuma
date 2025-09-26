@@ -21,12 +21,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $result = ['success' => false];
     if ($id > 0 && hash_equals($_SESSION['csrf'], $token)) {
         try {
+            // First, get the booking details to check status and PDF
+            $getStmt = $pdo->prepare('SELECT booking_receipt_pdf, status FROM bookings WHERE id = ?');
+            $getStmt->execute([$id]);
+            $booking = $getStmt->fetch();
+            
+            // Check if booking is confirmed and user is not admin
+            if ($booking && $booking['status'] === 'confirmed' && $_SESSION['role'] !== 'admin' && $_SESSION['role'] !== 'superadmin') {
+                $result['message'] = 'Cannot delete confirmed bookings (Admin only)';
+                if ($isAjax) {
+                    header('Content-Type: application/json');
+                    echo json_encode($result);
+                    exit();
+                }
+                header('Location: manage.php?error=confirmed_booking_restricted');
+                exit();
+            }
+            
+            // If booking had a PDF file, delete it from filesystem first
+            $pdfDeleted = false;
+            if ($booking && !empty($booking['booking_receipt_pdf'])) {
+                $pdfPath = __DIR__ . '/../Uploads/booking_docs/' . $booking['booking_receipt_pdf'];
+                error_log("Attempting to delete PDF: " . $pdfPath);
+                error_log("PDF filename from database: " . $booking['booking_receipt_pdf']);
+                
+                // Check if directory is writable
+                $uploadDir = __DIR__ . '/../Uploads/booking_docs/';
+                if (!is_writable($uploadDir)) {
+                    error_log("Upload directory is not writable: " . $uploadDir);
+                }
+                
+                if (file_exists($pdfPath)) {
+                    if (unlink($pdfPath)) {
+                        error_log("Successfully deleted PDF: " . $pdfPath);
+                        $pdfDeleted = true;
+                    } else {
+                        error_log("Failed to delete PDF file: " . $pdfPath);
+                        error_log("File permissions: " . substr(sprintf('%o', fileperms($pdfPath)), -4));
+                    }
+                } else {
+                    error_log("PDF file does not exist: " . $pdfPath);
+                    $pdfDeleted = true; // Consider it deleted if it doesn't exist
+                }
+            } else {
+                error_log("No PDF file to delete for booking ID: " . $id);
+                if ($booking) {
+                    error_log("Booking data: " . print_r($booking, true));
+                }
+                $pdfDeleted = true; // No PDF to delete
+            }
+            
+            // Delete the booking from database
             $stmt = $pdo->prepare('DELETE FROM bookings WHERE id = ?');
             $stmt->execute([$id]);
+            
             $result['success'] = true;
         } catch (Exception $e) {
             $result['success'] = false;
-            $result['message'] = 'Delete failed';
+            $result['message'] = 'Delete failed: ' . $e->getMessage();
         }
     } else {
         $result['message'] = 'Invalid request';

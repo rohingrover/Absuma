@@ -20,11 +20,22 @@ if ($bookingId <= 0 && $bookingCode === '') {
 }
 
 // Fetch booking with joins
-$sql = "SELECT b.*, c.client_name, c.client_code, fl.location AS from_location, tl.location AS to_location, u.full_name AS created_by_name
+$sql = "SELECT b.*, c.client_name, c.client_code, 
+        CASE 
+            WHEN b.from_location_type = 'yard' THEN yfl.yard_name
+            ELSE fl.location
+        END as from_location,
+        CASE 
+            WHEN b.to_location_type = 'yard' THEN ytl.yard_name
+            ELSE tl.location
+        END as to_location,
+        u.full_name AS created_by_name
         FROM bookings b
         LEFT JOIN clients c ON b.client_id = c.id
-        LEFT JOIN location fl ON b.from_location_id = fl.id
-        LEFT JOIN location tl ON b.to_location_id = tl.id
+        LEFT JOIN location fl ON b.from_location_id = fl.id AND b.from_location_type = 'location'
+        LEFT JOIN location tl ON b.to_location_id = tl.id AND b.to_location_type = 'location'
+        LEFT JOIN yard_locations yfl ON b.from_location_id = yfl.id AND b.from_location_type = 'yard'
+        LEFT JOIN yard_locations ytl ON b.to_location_id = ytl.id AND b.to_location_type = 'yard'
         LEFT JOIN users u ON b.created_by = u.id
         WHERE ";
 if ($bookingId > 0) {
@@ -57,10 +68,20 @@ try {
         $hasPerContainerLoc = in_array('from_location_id', $bcCols, true) && in_array('to_location_id', $bcCols, true);
 
         if ($hasPerContainerLoc) {
-            $c = $pdo->prepare("SELECT bc.*, fl.location AS from_location_name, tl.location AS to_location_name
+            $c = $pdo->prepare("SELECT bc.*, 
+                                 CASE 
+                                     WHEN bc.from_location_type = 'yard' THEN yfl.yard_name
+                                     ELSE fl.location
+                                 END as from_location_name,
+                                 CASE 
+                                     WHEN bc.to_location_type = 'yard' THEN ytl.yard_name
+                                     ELSE tl.location
+                                 END as to_location_name
                                  FROM booking_containers bc
-                                 LEFT JOIN location fl ON bc.from_location_id = fl.id
-                                 LEFT JOIN location tl ON bc.to_location_id = tl.id
+                                 LEFT JOIN location fl ON bc.from_location_id = fl.id AND bc.from_location_type = 'location'
+                                 LEFT JOIN location tl ON bc.to_location_id = tl.id AND bc.to_location_type = 'location'
+                                 LEFT JOIN yard_locations yfl ON bc.from_location_id = yfl.id AND bc.from_location_type = 'yard'
+                                 LEFT JOIN yard_locations ytl ON bc.to_location_id = ytl.id AND bc.to_location_type = 'yard'
                                  WHERE bc.booking_id = ?
                                  ORDER BY bc.container_sequence");
         } else {
@@ -245,7 +266,7 @@ if (empty($containers)) {
                         </div>
                     </div>
                             
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 <!-- Booking ID -->
                                 <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
                                     <div class="flex items-center mb-2">
@@ -263,6 +284,28 @@ if (empty($containers)) {
                                     </div>
                                     <div class="text-lg font-bold text-green-900"><?= htmlspecialchars($booking['client_name']) ?></div>
                                     <div class="text-sm text-green-700"><?= htmlspecialchars($booking['client_code']) ?></div>
+                                </div>
+                                
+                                <!-- Movement Type -->
+                                <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
+                                    <div class="flex items-center mb-2">
+                                        <i class="fas fa-truck text-blue-600 mr-2"></i>
+                                        <div class="text-sm font-medium text-blue-800">Movement Type</div>
+                                    </div>
+                                    <div class="text-lg font-bold text-blue-900">
+                                        <?php 
+                                        $movement_type = $booking['movement_type'] ?? '';
+                                        $display_type = '';
+                                        switch($movement_type) {
+                                            case 'import': $display_type = 'Import'; break;
+                                            case 'export': $display_type = 'Export'; break;
+                                            case 'port_yard_movement': $display_type = 'Port/Yard Movement'; break;
+                                            case 'domestic_movement': $display_type = 'Domestic Movement'; break;
+                                            default: $display_type = 'Not specified';
+                                        }
+                                        echo htmlspecialchars($display_type);
+                                        ?>
+                                    </div>
                                 </div>
                                 
                                 <!-- Containers -->
@@ -295,7 +338,7 @@ if (empty($containers)) {
                                 
                                 if ($showMainRoute): ?>
                                 <!-- Route -->
-                                <div class="bg-gradient-to-br from-teal-50 to-teal-100 p-4 rounded-lg border border-teal-200 md:col-span-2 lg:col-span-3">
+                                <div class="bg-gradient-to-br from-teal-50 to-teal-100 p-4 rounded-lg border border-teal-200 col-span-1 md:col-span-2 lg:col-span-4">
                                     <div class="flex items-center mb-3">
                                         <i class="fas fa-route text-teal-600 mr-2"></i>
                                         <div class="text-sm font-medium text-teal-800">Route</div>
@@ -325,11 +368,11 @@ if (empty($containers)) {
                                 Booking Details
                             </h2>
                             
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div class="space-y-4">
-                                    <div class="flex items-center justify-between py-3 border-b border-gray-100">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="bg-white rounded-lg border border-gray-100 p-4 shadow-sm">
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
                                         <div class="flex items-center">
-                                            <i class="fas fa-calendar-plus text-gray-400 mr-3"></i>
+                                            <i class="fas fa-calendar-plus text-teal-600 mr-3"></i>
                                             <span class="text-sm font-medium text-gray-600">Created Date</span>
                                         </div>
                                         <span class="text-sm font-semibold text-gray-900">
@@ -337,9 +380,9 @@ if (empty($containers)) {
                                         </span>
                                     </div>
                                     
-                                    <div class="flex items-center justify-between py-3 border-b border-gray-100">
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
                                         <div class="flex items-center">
-                                            <i class="fas fa-clock text-gray-400 mr-3"></i>
+                                            <i class="fas fa-clock text-teal-600 mr-3"></i>
                                             <span class="text-sm font-medium text-gray-600">Created Time</span>
                                         </div>
                                         <span class="text-sm font-semibold text-gray-900">
@@ -347,9 +390,9 @@ if (empty($containers)) {
                                         </span>
                                     </div>
                                     
-                                    <div class="flex items-center justify-between py-3 border-b border-gray-100">
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
                                         <div class="flex items-center">
-                                            <i class="fas fa-user text-gray-400 mr-3"></i>
+                                            <i class="fas fa-user text-teal-600 mr-3"></i>
                                             <span class="text-sm font-medium text-gray-600">Created By</span>
                                         </div>
                                         <span class="text-sm font-semibold text-gray-900">
@@ -358,10 +401,10 @@ if (empty($containers)) {
                                     </div>
                                 </div>
                                 
-                                <div class="space-y-4">
-                                    <div class="flex items-center justify-between py-3 border-b border-gray-100">
+                                <div class="bg-white rounded-lg border border-gray-100 p-4 shadow-sm">
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
                                         <div class="flex items-center">
-                                            <i class="fas fa-edit text-gray-400 mr-3"></i>
+                                            <i class="fas fa-edit text-teal-600 mr-3"></i>
                                             <span class="text-sm font-medium text-gray-600">Last Updated</span>
                                         </div>
                                         <span class="text-sm font-semibold text-gray-900">
@@ -369,9 +412,9 @@ if (empty($containers)) {
                                         </span>
                                     </div>
                                     
-                                    <div class="flex items-center justify-between py-3 border-b border-gray-100">
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
                                         <div class="flex items-center">
-                                            <i class="fas fa-id-badge text-gray-400 mr-3"></i>
+                                            <i class="fas fa-id-badge text-teal-600 mr-3"></i>
                                             <span class="text-sm font-medium text-gray-600">Booking ID</span>
                                         </div>
                                         <span class="text-sm font-semibold text-gray-900 font-mono">
@@ -379,16 +422,54 @@ if (empty($containers)) {
                                         </span>
                                     </div>
                                     
-                                    <div class="flex items-center justify-between py-3 border-b border-gray-100">
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
                                         <div class="flex items-center">
-                                            <i class="fas fa-tag text-gray-400 mr-3"></i>
+                                            <i class="fas fa-tag text-teal-600 mr-3"></i>
                                             <span class="text-sm font-medium text-gray-600">Client Code</span>
-                    </div>
+                                        </div>
                                         <span class="text-sm font-semibold text-gray-900 font-mono">
                                             <?= htmlspecialchars($booking['client_code']) ?>
                                         </span>
-                    </div>
-                    </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="bg-white rounded-lg border border-gray-100 p-4 shadow-sm">
+                                    <?php if (!empty($booking['booking_receipt_pdf'])): ?>
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                                        <div class="flex items-center">
+                                            <i class="fas fa-file-pdf text-teal-600 mr-3"></i>
+                                            <span class="text-sm font-medium text-gray-600">Booking Receipt</span>
+                                        </div>
+                                        <a href="../Uploads/booking_docs/<?= htmlspecialchars($booking['booking_receipt_pdf']) ?>" 
+                                           target="_blank" 
+                                           class="inline-flex items-center px-3 py-1 bg-red-100 text-red-800 text-xs font-medium rounded-full hover:bg-red-200 transition-colors">
+                                            <i class="fas fa-download mr-1"></i>
+                                            Download PDF
+                                        </a>
+                                    </div>
+                                    <?php endif; ?>
+                                    
+                                    <div class="flex items-center justify-between py-2 border-b border-gray-100">
+                                        <div class="flex items-center">
+                                            <i class="fas fa-truck-loading text-teal-600 mr-3"></i>
+                                            <span class="text-sm font-medium text-gray-600">Status</span>
+                                        </div>
+                                        <?php
+                                        $status = $booking['status'];
+                                        $statusColors = [
+                                            'pending' => 'bg-yellow-100 text-yellow-800',
+                                            'confirmed' => 'bg-blue-100 text-blue-800',
+                                            'in_progress' => 'bg-purple-100 text-purple-800',
+                                            'completed' => 'bg-green-100 text-green-800',
+                                            'cancelled' => 'bg-red-100 text-red-800'
+                                        ];
+                                        $statusColor = $statusColors[$status] ?? 'bg-gray-100 text-gray-800';
+                                        ?>
+                                        <span class="inline-flex px-3 py-1 text-xs font-semibold rounded-full <?= $statusColor ?>">
+                                            <?= ucfirst(str_replace('_', ' ', $status)) ?>
+                                        </span>
+                                    </div>
+                                </div>
                     </div>
                         </div>
                         
@@ -502,10 +583,10 @@ if (empty($containers)) {
                                 Booking Summary
                             </h2>
                             
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <!-- Total Containers -->
-                                <div class="text-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200">
-                                    <div class="w-12 h-12 bg-blue-500 text-white rounded-full flex items-center justify-center mx-auto mb-3">
+                                <div class="text-center p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border border-blue-200 shadow-sm">
+                                    <div class="w-10 h-10 bg-blue-500 text-white rounded-full flex items-center justify-center mx-auto mb-2">
                                         <i class="fas fa-boxes text-lg"></i>
                                     </div>
                                     <div class="text-2xl font-bold text-blue-900"><?= (int)$booking['no_of_containers'] ?></div>
@@ -513,8 +594,8 @@ if (empty($containers)) {
                                 </div>
                                 
                                 <!-- 20ft Containers -->
-                                <div class="text-center p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-lg border border-green-200">
-                                    <div class="w-12 h-12 bg-green-500 text-white rounded-full flex items-center justify-center mx-auto mb-3">
+                                <div class="text-center p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-lg border border-green-200 shadow-sm">
+                                    <div class="w-10 h-10 bg-green-500 text-white rounded-full flex items-center justify-center mx-auto mb-2">
                                         <i class="fas fa-cube text-lg"></i>
                                     </div>
                                     <div class="text-2xl font-bold text-green-900">
@@ -532,8 +613,8 @@ if (empty($containers)) {
                                 </div>
                                 
                                 <!-- 40ft Containers -->
-                                <div class="text-center p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200">
-                                    <div class="w-12 h-12 bg-purple-500 text-white rounded-full flex items-center justify-center mx-auto mb-3">
+                                <div class="text-center p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg border border-purple-200 shadow-sm">
+                                    <div class="w-10 h-10 bg-purple-500 text-white rounded-full flex items-center justify-center mx-auto mb-2">
                                         <i class="fas fa-cubes text-lg"></i>
                                     </div>
                                     <div class="text-2xl font-bold text-purple-900">
@@ -551,8 +632,8 @@ if (empty($containers)) {
                                 </div>
                                 
                                 <!-- Booking Age -->
-                                <div class="text-center p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg border border-orange-200">
-                                    <div class="w-12 h-12 bg-orange-500 text-white rounded-full flex items-center justify-center mx-auto mb-3">
+                                <div class="text-center p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg border border-orange-200 shadow-sm">
+                                    <div class="w-10 h-10 bg-orange-500 text-white rounded-full flex items-center justify-center mx-auto mb-2">
                                         <i class="fas fa-calendar-day text-lg"></i>
                                     </div>
                                     <div class="text-2xl font-bold text-orange-900">
@@ -632,10 +713,29 @@ $message .= "*Booking ID:* " . htmlspecialchars($booking['booking_id']) . "\n";
 $message .= "*Client:* " . htmlspecialchars($booking['client_name']) . "\n";
 $message .= "*Client ID:* " . htmlspecialchars($booking['client_code'] ?? 'N/A') . "\n";
 $message .= "*Date:* " . date('d M Y', strtotime($booking['created_at'])) . "\n";
+
+// Add movement type
+$movement_type = $booking['movement_type'] ?? '';
+$display_type = '';
+switch($movement_type) {
+    case 'import': $display_type = 'Import'; break;
+    case 'export': $display_type = 'Export'; break;
+    case 'port_yard_movement': $display_type = 'Port/Yard Movement'; break;
+    case 'domestic_movement': $display_type = 'Domestic Movement'; break;
+    default: $display_type = 'Not specified';
+}
+$message .= "*Movement Type:* " . $display_type . "\n";
+
 $message .= "*Route:* " . htmlspecialchars($booking['from_location'] ?? 'N/A') . " → " . htmlspecialchars($booking['to_location'] ?? 'N/A') . "\n";
 
 if (!empty($containers)) {
     $message .= "*Total Containers:* " . count($containers) . "\n";
+    
+    // Add container details
+    $message .= "\n*Container Details:*\n";
+    foreach ($containers as $idx => $container) {
+        $message .= ($idx + 1) . ". " . ($container['container_type'] ?? 'N/A') . " - " . ($container['container_number_1'] ?? 'N/A') . "\n";
+    }
 }
 
 $message .= "\n*PDF Link:*\n";

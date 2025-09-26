@@ -40,13 +40,21 @@ $sql = "
         b.*,
         c.client_name,
         c.client_code,
-        fl.location as from_location,
-        tl.location as to_location,
+        CASE 
+            WHEN b.from_location_type = 'yard' THEN yfl.yard_name
+            ELSE fl.location
+        END as from_location,
+        CASE 
+            WHEN b.to_location_type = 'yard' THEN ytl.yard_name
+            ELSE tl.location
+        END as to_location,
         u.full_name as created_by_name
     FROM bookings b
     LEFT JOIN clients c ON b.client_id = c.id
-    LEFT JOIN location fl ON b.from_location_id = fl.id
-    LEFT JOIN location tl ON b.to_location_id = tl.id
+    LEFT JOIN location fl ON b.from_location_id = fl.id AND b.from_location_type = 'location'
+    LEFT JOIN location tl ON b.to_location_id = tl.id AND b.to_location_type = 'location'
+    LEFT JOIN yard_locations yfl ON b.from_location_id = yfl.id AND b.from_location_type = 'yard'
+    LEFT JOIN yard_locations ytl ON b.to_location_id = ytl.id AND b.to_location_type = 'yard'
     LEFT JOIN users u ON b.created_by = u.id
     WHERE " . implode(' AND ', $where) . "
     ORDER BY b.created_at DESC
@@ -74,7 +82,7 @@ $booking_stats = [
 
 try {
     $statsSql = "SELECT 
-        COUNT(*) AS total,
+        COUNT(DISTINCT b.id) AS total,
         SUM(CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END) AS pending,
         SUM(CASE WHEN b.status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
         SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) AS completed,
@@ -84,7 +92,35 @@ try {
         SUM(CASE WHEN bc.container_type = '40ft' THEN 1 ELSE 0 END) AS containers_40ft
       FROM bookings b
       LEFT JOIN booking_containers bc ON bc.booking_id = b.id
-      WHERE " . implode(' AND ', $where);
+      WHERE " . implode(' AND ', $where) . "
+      GROUP BY b.id";
+    
+    // Since we need aggregated stats across all bookings, we need a wrapper query
+    $statsSql = "SELECT 
+        COUNT(*) AS total,
+        SUM(pending) AS pending,
+        SUM(in_progress) AS in_progress,
+        SUM(completed) AS completed,
+        SUM(cancelled) AS cancelled,
+        AVG(avg_containers) AS avg_containers,
+        SUM(containers_20ft) AS containers_20ft,
+        SUM(containers_40ft) AS containers_40ft
+      FROM (
+        SELECT 
+            b.id,
+            CASE WHEN b.status = 'pending' THEN 1 ELSE 0 END AS pending,
+            CASE WHEN b.status = 'in_progress' THEN 1 ELSE 0 END AS in_progress,
+            CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END AS completed,
+            CASE WHEN b.status = 'cancelled' THEN 1 ELSE 0 END AS cancelled,
+            b.no_of_containers AS avg_containers,
+            SUM(CASE WHEN bc.container_type = '20ft' THEN 1 ELSE 0 END) AS containers_20ft,
+            SUM(CASE WHEN bc.container_type = '40ft' THEN 1 ELSE 0 END) AS containers_40ft
+        FROM bookings b
+        LEFT JOIN booking_containers bc ON bc.booking_id = b.id
+        WHERE " . implode(' AND ', $where) . "
+        GROUP BY b.id, b.status, b.no_of_containers
+      ) booking_stats";
+    
     $statsStmt = $pdo->prepare($statsSql);
     $statsStmt->execute($params);
     $row = $statsStmt->fetch();
@@ -141,6 +177,12 @@ if ($client_id_f) {
             break;
         }
     }
+}
+
+// Check for error messages
+$error_message = '';
+if (isset($_GET['error']) && $_GET['error'] === 'confirmed_booking_restricted') {
+    $error_message = 'Cannot edit/delete confirmed bookings. Only administrators can perform this action.';
 }
 
 // Get container details for each booking
@@ -304,6 +346,16 @@ if (!empty($bookings)) {
             <main class="flex-1 p-6 overflow-auto">
                 <div class="max-w-7xl mx-auto">
                     <div class="space-y-6">
+                        
+                        <!-- Error Message -->
+                        <?php if (!empty($error_message)): ?>
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                            <div class="flex items-center">
+                                <i class="fas fa-exclamation-triangle text-red-600 mr-3"></i>
+                                <div class="text-red-800 font-medium"><?= htmlspecialchars($error_message) ?></div>
+                            </div>
+                        </div>
+                        <?php endif; ?>
 
                         <!-- Statistics Cards -->
                         <div class="bg-white rounded-xl shadow-soft p-6 mb-6 card-hover-effect animate-fade-in">
@@ -412,6 +464,7 @@ if (!empty($bookings)) {
                                         <tr>
                                             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Booking ID</th>
                                             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Movement Type</th>
                                             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Containers</th>
                                             
                                             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Route</th>
@@ -423,7 +476,7 @@ if (!empty($bookings)) {
                                     <tbody class="bg-white divide-y divide-gray-200">
                                         <?php if (empty($bookings)): ?>
                                             <tr>
-                                                <td colspan="8" class="px-3 py-8 text-center text-gray-500">
+                                                <td colspan="9" class="px-3 py-8 text-center text-gray-500">
                                                     <i class="fas fa-inbox text-3xl text-gray-300 mb-2"></i>
                                                     <p class="text-sm">No bookings found</p>
                                                     <p class="text-xs text-gray-400">Create your first booking to get started</p>
@@ -443,8 +496,31 @@ if (!empty($bookings)) {
                                                         </div>
                                                         <div class="text-xs text-gray-500 truncate"><?= htmlspecialchars($booking['client_code']) ?></div>
                                                     </td>
+                                                    <td class="px-3 py-3 max-w-[120px]">
+                                                        <div class="text-xs text-gray-900 font-medium">
+                                                            <?php 
+                                                            $movement_type = $booking['movement_type'] ?? '';
+                                                            $display_type = '';
+                                                            switch($movement_type) {
+                                                                case 'import': $display_type = 'Import'; break;
+                                                                case 'export': $display_type = 'Export'; break;
+                                                                case 'port_yard_movement': $display_type = 'Port/Yard Movement'; break;
+                                                                case 'domestic_movement': $display_type = 'Domestic Movement'; break;
+                                                                default: $display_type = 'N/A';
+                                                            }
+                                                            echo htmlspecialchars($display_type);
+                                                            ?>
+                                                        </div>
+                                                    </td>
                                                     <td class="px-3 py-3 text-center">
-                                                        <div class="text-xs text-gray-900 font-medium"><?= $booking['no_of_containers'] ?></div>
+                                                        <div class="text-xs text-gray-900 font-medium"><?= $booking['no_of_containers'] ?> </div>
+                                                        <?php if (!empty($booking_containers[$booking['id']])): ?>
+                                                            <div class="text-gray-600 text-xs mt-1">
+                                                                <?php foreach ($booking_containers[$booking['id']] as $idx => $bc): ?>
+                                                                    <div class="mb-1">Container <?= $idx + 1 ?>: <?= htmlspecialchars($bc['container_type'] ?? '') ?> - <?= htmlspecialchars($bc['container_number_1'] ?? '') ?><?= (isset($bc['container_number_2']) && $bc['container_number_2'] !== '') ? ' / ' . htmlspecialchars($bc['container_number_2']) : '' ?></div>
+                                                                <?php endforeach; ?>
+                                                            </div>
+                                                        <?php endif; ?>
                                                     </td>
                                                     <td class="px-3 py-3 max-w-[160px]">
                                                         <?php if ($booking['from_location'] || $booking['to_location']): ?>
@@ -486,12 +562,18 @@ if (!empty($bookings)) {
                                                             <a href="view.php?id=<?= (int)$booking['id'] ?>" class="text-absuma-red hover:text-absuma-red-dark" title="View Details">
                                                                 <i class="fas fa-eye text-sm"></i>
                                                             </a>
+                                                            <?php if ($booking['status'] !== 'confirmed' || $_SESSION['role'] === 'admin' || $_SESSION['role'] === 'superadmin'): ?>
                                                             <a href="edit.php?booking_id=<?= urlencode($booking['booking_id']) ?>" class="text-blue-600 hover:text-blue-800" title="Edit">
                                                                 <i class="fas fa-edit text-sm"></i>
                                                             </a>
                                                             <a href="#" data-booking-id="<?= (int)$booking['id'] ?>" data-booking-code="<?= htmlspecialchars($booking['booking_id']) ?>" class="text-absuma-red hover:text-absuma-red-dark js-delete-booking" title="Delete">
                                                                 <i class="fas fa-trash text-sm"></i>
                                                             </a>
+                                                            <?php else: ?>
+                                                            <span class="text-gray-400" title="Cannot edit/delete confirmed bookings (Admin only)">
+                                                                <i class="fas fa-lock text-sm"></i>
+                                                            </span>
+                                                            <?php endif; ?>
                                                         </div>
                                                     </td>
                                                 </tr>

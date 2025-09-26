@@ -22,19 +22,39 @@ if ($booking_row_id <= 0 && $booking_code_param === '') {
 
 // Fetch existing booking data (by id or booking_id)
 if ($booking_row_id > 0) {
-    $stmt = $pdo->prepare("SELECT b.*, c.client_name, c.client_code, fl.location AS from_location_name, tl.location AS to_location_name
+    $stmt = $pdo->prepare("SELECT b.*, c.client_name, c.client_code, 
+                           CASE 
+                               WHEN b.from_location_type = 'yard' THEN yfl.yard_name
+                               ELSE fl.location
+                           END as from_location_name,
+                           CASE 
+                               WHEN b.to_location_type = 'yard' THEN ytl.yard_name
+                               ELSE tl.location
+                           END as to_location_name
                            FROM bookings b
                            LEFT JOIN clients c ON b.client_id = c.id
-                           LEFT JOIN location fl ON b.from_location_id = fl.id
-                           LEFT JOIN location tl ON b.to_location_id = tl.id
+                           LEFT JOIN location fl ON b.from_location_id = fl.id AND b.from_location_type = 'location'
+                           LEFT JOIN location tl ON b.to_location_id = tl.id AND b.to_location_type = 'location'
+                           LEFT JOIN yard_locations yfl ON b.from_location_id = yfl.id AND b.from_location_type = 'yard'
+                           LEFT JOIN yard_locations ytl ON b.to_location_id = ytl.id AND b.to_location_type = 'yard'
                            WHERE b.id = ?");
     $stmt->execute([$booking_row_id]);
 } else {
-    $stmt = $pdo->prepare("SELECT b.*, c.client_name, c.client_code, fl.location AS from_location_name, tl.location AS to_location_name
+    $stmt = $pdo->prepare("SELECT b.*, c.client_name, c.client_code, 
+                           CASE 
+                               WHEN b.from_location_type = 'yard' THEN yfl.yard_name
+                               ELSE fl.location
+                           END as from_location_name,
+                           CASE 
+                               WHEN b.to_location_type = 'yard' THEN ytl.yard_name
+                               ELSE tl.location
+                           END as to_location_name
                            FROM bookings b
                            LEFT JOIN clients c ON b.client_id = c.id
-                           LEFT JOIN location fl ON b.from_location_id = fl.id
-                           LEFT JOIN location tl ON b.to_location_id = tl.id
+                           LEFT JOIN location fl ON b.from_location_id = fl.id AND b.from_location_type = 'location'
+                           LEFT JOIN location tl ON b.to_location_id = tl.id AND b.to_location_type = 'location'
+                           LEFT JOIN yard_locations yfl ON b.from_location_id = yfl.id AND b.from_location_type = 'yard'
+                           LEFT JOIN yard_locations ytl ON b.to_location_id = ytl.id AND b.to_location_type = 'yard'
                            WHERE b.booking_id = ?");
     $stmt->execute([$booking_code_param]);
 }
@@ -45,12 +65,32 @@ if (!$existing_booking) {
     exit();
 }
 
+// Check if booking is confirmed and user is not admin
+if ($existing_booking['status'] === 'confirmed' && $_SESSION['role'] !== 'admin' && $_SESSION['role'] !== 'superadmin') {
+    header('Location: manage.php?error=confirmed_booking_restricted');
+    exit();
+}
+
 // Fetch existing containers
 $existing_containers = [];
 try {
     $existsStmt = $pdo->query("SHOW TABLES LIKE 'booking_containers'");
     if ($existsStmt->fetch()) {
-        $c = $pdo->prepare("SELECT * FROM booking_containers WHERE booking_id = ? ORDER BY container_sequence");
+        $c = $pdo->prepare("SELECT bc.*, 
+                             CASE 
+                                 WHEN bc.from_location_type = 'yard' THEN yfl.yard_name
+                                 ELSE fl.location
+                             END as from_location_name,
+                             CASE 
+                                 WHEN bc.to_location_type = 'yard' THEN ytl.yard_name
+                                 ELSE tl.location
+                             END as to_location_name
+                             FROM booking_containers bc
+                             LEFT JOIN location fl ON bc.from_location_id = fl.id AND bc.from_location_type = 'location'
+                             LEFT JOIN location tl ON bc.to_location_id = tl.id AND bc.to_location_type = 'location'
+                             LEFT JOIN yard_locations yfl ON bc.from_location_id = yfl.id AND bc.from_location_type = 'yard'
+                             LEFT JOIN yard_locations ytl ON bc.to_location_id = ytl.id AND bc.to_location_type = 'yard'
+                             WHERE bc.booking_id = ? ORDER BY bc.container_sequence");
         $c->execute([$existing_booking['id']]);
         $existing_containers = $c->fetchAll();
     }
@@ -67,23 +107,100 @@ foreach ($existing_containers as $ec) {
 $clients_stmt = $pdo->query("SELECT id, client_name, client_code FROM clients WHERE status = 'active' ORDER BY client_name");
 $clients = $clients_stmt->fetchAll();
 
+// Get locations for autocomplete (both regular locations and yard locations)
+$locations = [];
 $locations_stmt = $pdo->query("SELECT id, location FROM location ORDER BY location");
-$locations = $locations_stmt->fetchAll();
+$location_results = $locations_stmt->fetchAll();
+foreach ($location_results as $loc) {
+    $locations[] = [
+        'id' => 'loc_' . $loc['id'],
+        'location' => $loc['location'] . ' (Location)',
+        'source' => 'location',
+        'original_name' => $loc['location']
+    ];
+}
+
+// Get from yard_locations table (only active ones)
+try {
+    $yard_stmt = $pdo->query("SELECT id, yard_name FROM yard_locations WHERE is_active = 1 ORDER BY yard_name");
+    $yard_results = $yard_stmt->fetchAll();
+    foreach ($yard_results as $yard) {
+        $locations[] = [
+            'id' => 'yard_' . $yard['id'],
+            'location' => $yard['yard_name'] . ' (Yard)',
+            'source' => 'yard',
+            'original_name' => $yard['yard_name']
+        ];
+    }
+} catch (PDOException $e) {
+    // yard_locations table might not exist, continue without it
+}
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     try {
         $client_id = isset($_POST['client_id']) ? (int)$_POST['client_id'] : 0;
         $no_of_containers = isset($_POST['no_of_containers']) ? (int)$_POST['no_of_containers'] : 0;
+        $movement_type = isset($_POST['movement_type']) ? trim($_POST['movement_type']) : '';
         $container_types = $_POST['container_types'] ?? [];
         $container_numbers = $_POST['container_numbers'] ?? [];
+        
+        // Handle PDF file upload
+        $booking_receipt_pdf = null;
+        if (isset($_FILES['booking_receipt_pdf']) && $_FILES['booking_receipt_pdf']['error'] !== UPLOAD_ERR_NO_FILE) {
+            if ($_FILES['booking_receipt_pdf']['error'] === UPLOAD_ERR_OK) {
+                $upload_dir = __DIR__ . '/../Uploads/booking_docs/';
+                if (!is_dir($upload_dir)) {
+                    if (!mkdir($upload_dir, 0755, true)) {
+                        $upload_error = 'Failed to create upload directory';
+                    }
+                }
+                $file_extension = strtolower(pathinfo($_FILES['booking_receipt_pdf']['name'], PATHINFO_EXTENSION));
+                if ($file_extension === 'pdf') {
+                    $file_name = 'booking_receipt_' . time() . '_' . uniqid() . '.pdf';
+                    $file_path = $upload_dir . $file_name;
+                    if (move_uploaded_file($_FILES['booking_receipt_pdf']['tmp_name'], $file_path)) {
+                        $booking_receipt_pdf = $file_name;
+                    }
+                }
+            }
+        }
+        
         // Normalize optional FK fields to NULL when empty
-        $from_location_id = isset($_POST['from_location_id']) && $_POST['from_location_id'] !== ''
-            ? (int)$_POST['from_location_id']
-            : null;
-        $to_location_id = isset($_POST['to_location_id']) && $_POST['to_location_id'] !== ''
-            ? (int)$_POST['to_location_id']
-            : null;
+        // Handle both regular locations (loc_X) and yard locations (yard_X)
+        $from_location_id = null;
+        $from_location_type = null;
+        if (isset($_POST['from_location_id']) && $_POST['from_location_id'] !== '') {
+            $from_location_value = $_POST['from_location_id'];
+            if (strpos($from_location_value, 'loc_') === 0) {
+                $from_location_id = (int)substr($from_location_value, 4);
+                $from_location_type = 'location';
+            } elseif (strpos($from_location_value, 'yard_') === 0) {
+                $yard_id = (int)substr($from_location_value, 5);
+                $from_location_id = $yard_id;
+                $from_location_type = 'yard';
+            } else {
+                $from_location_id = (int)$from_location_value;
+                $from_location_type = 'location';
+            }
+        }
+        
+        $to_location_id = null;
+        $to_location_type = null;
+        if (isset($_POST['to_location_id']) && $_POST['to_location_id'] !== '') {
+            $to_location_value = $_POST['to_location_id'];
+            if (strpos($to_location_value, 'loc_') === 0) {
+                $to_location_id = (int)substr($to_location_value, 4);
+                $to_location_type = 'location';
+            } elseif (strpos($to_location_value, 'yard_') === 0) {
+                $yard_id = (int)substr($to_location_value, 5);
+                $to_location_id = $yard_id;
+                $to_location_type = 'yard';
+            } else {
+                $to_location_id = (int)$to_location_value;
+                $to_location_type = 'location';
+            }
+        }
         $container_from_location_ids = $_POST['container_from_location_ids'] ?? [];
         $container_to_location_ids = $_POST['container_to_location_ids'] ?? [];
         $same_locations_all = isset($_POST['same_locations_all']) ? 1 : 0;
@@ -118,12 +235,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         try {
             // Update main booking record
-            $update_stmt = $pdo->prepare("
-                UPDATE bookings 
-                SET booking_id = ?, client_id = ?, no_of_containers = ?, from_location_id = ?, to_location_id = ?, updated_by = ?
-                WHERE id = ?
-            ");
-            $update_stmt->execute([$booking_id, $client_id, $no_of_containers, $from_location_id, $to_location_id, $_SESSION['user_id'], $existing_booking['id']]);
+            if ($booking_receipt_pdf) {
+                $update_stmt = $pdo->prepare("
+                    UPDATE bookings 
+                    SET booking_id = ?, client_id = ?, no_of_containers = ?, movement_type = ?, from_location_id = ?, from_location_type = ?, to_location_id = ?, to_location_type = ?, booking_receipt_pdf = ?, updated_by = ?
+                    WHERE id = ?
+                ");
+                $update_stmt->execute([$booking_id, $client_id, $no_of_containers, $movement_type, $from_location_id, $from_location_type, $to_location_id, $to_location_type, $booking_receipt_pdf, $_SESSION['user_id'], $existing_booking['id']]);
+            } else {
+                $update_stmt = $pdo->prepare("
+                    UPDATE bookings 
+                    SET booking_id = ?, client_id = ?, no_of_containers = ?, movement_type = ?, from_location_id = ?, from_location_type = ?, to_location_id = ?, to_location_type = ?, updated_by = ?
+                    WHERE id = ?
+                ");
+                $update_stmt->execute([$booking_id, $client_id, $no_of_containers, $movement_type, $from_location_id, $from_location_type, $to_location_id, $to_location_type, $_SESSION['user_id'], $existing_booking['id']]);
+            }
             
             $booking_db_id = $existing_booking['id'];
             
@@ -155,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 } catch (Exception $e) { $containerTypeAllowsNull = false; }
 
                 if ($hasPerContainerLocations) {
-                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, to_location_id, created_by, updated_by) \n                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n                    ");
+                    $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, from_location_id, from_location_type, to_location_id, to_location_type, created_by, updated_by) \n                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n                    ");
                 } else {
                     $container_stmt_any = $pdo->prepare("\n                        INSERT INTO booking_containers (booking_id, container_sequence, container_type, container_number_1, container_number_2, created_by, updated_by) \n                        VALUES (?, ?, ?, ?, ?, ?, ?)\n                    ");
                 }
@@ -178,17 +304,56 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                     // Determine per-container locations
                     $container_from_id = null;
+                    $container_from_type = null;
                     $container_to_id = null;
+                    $container_to_type = null;
                     if ($hasPerContainerLocations) {
-                        $container_from_id = isset($container_from_location_ids[$i]) && $container_from_location_ids[$i] !== '' ? (int)$container_from_location_ids[$i] : null;
-                        $container_to_id = isset($container_to_location_ids[$i]) && $container_to_location_ids[$i] !== '' ? (int)$container_to_location_ids[$i] : null;
+                        // Handle container from location
+                        if (isset($container_from_location_ids[$i]) && $container_from_location_ids[$i] !== '') {
+                            $container_from_value = $container_from_location_ids[$i];
+                            if (strpos($container_from_value, 'loc_') === 0) {
+                                $container_from_id = (int)substr($container_from_value, 4);
+                                $container_from_type = 'location';
+                            } elseif (strpos($container_from_value, 'yard_') === 0) {
+                                $yard_id = (int)substr($container_from_value, 5);
+                                $container_from_id = $yard_id;
+                                $container_from_type = 'yard';
+                            } else {
+                                $container_from_id = (int)$container_from_value;
+                                $container_from_type = 'location';
+                            }
+                        }
+                        
+                        // Handle container to location
+                        if (isset($container_to_location_ids[$i]) && $container_to_location_ids[$i] !== '') {
+                            $container_to_value = $container_to_location_ids[$i];
+                            if (strpos($container_to_value, 'loc_') === 0) {
+                                $container_to_id = (int)substr($container_to_value, 4);
+                                $container_to_type = 'location';
+                            } elseif (strpos($container_to_value, 'yard_') === 0) {
+                                $yard_id = (int)substr($container_to_value, 5);
+                                $container_to_id = $yard_id;
+                                $container_to_type = 'yard';
+                            } else {
+                                $container_to_id = (int)$container_to_value;
+                                $container_to_type = 'location';
+                            }
+                        }
 
                         if ($same_locations_all) {
                             $container_from_id = $from_location_id;
+                            $container_from_type = $from_location_type;
                             $container_to_id = $to_location_id;
+                            $container_to_type = $to_location_type;
                         } else {
-                            if ($container_from_id === null) { $container_from_id = $from_location_id; }
-                            if ($container_to_id === null) { $container_to_id = $to_location_id; }
+                            if ($container_from_id === null) { 
+                                $container_from_id = $from_location_id; 
+                                $container_from_type = $from_location_type;
+                            }
+                            if ($container_to_id === null) { 
+                                $container_to_id = $to_location_id; 
+                                $container_to_type = $to_location_type;
+                            }
                         }
                     }
 
@@ -206,7 +371,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                     if ($hasPerContainerLocations) {
                         $container_stmt_any->execute([ 
-                            $booking_db_id, $sequence, $container_type, $number1, $number2, $container_from_id, $container_to_id, $preservedCreatedBy, $_SESSION['user_id']
+                            $booking_db_id, $sequence, $container_type, $number1, $number2, $container_from_id, $container_from_type, $container_to_id, $container_to_type, $preservedCreatedBy, $_SESSION['user_id']
                         ]);
                     } else {
                         $container_stmt_any->execute([ 
@@ -790,7 +955,71 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                             Maximum 20 containers per booking
                                         </p>
                                     </div>
+
+                                    <!-- Movement Type -->
+                                    <div>
+                                        <label for="movement_type" class="form-label">
+                                            <i class="fas fa-truck text-teal-600 mr-2"></i>Movement Type *
+                                        </label>
+                                        <select name="movement_type" id="movement_type" class="input-enhanced" required>
+                                            <option value="">Select Movement Type</option>
+                                            <option value="import" <?= ($_POST['movement_type'] ?? $existing_booking['movement_type'] ?? '') === 'import' ? 'selected' : '' ?>>Import</option>
+                                            <option value="export" <?= ($_POST['movement_type'] ?? $existing_booking['movement_type'] ?? '') === 'export' ? 'selected' : '' ?>>Export</option>
+                                            <option value="port_yard_movement" <?= ($_POST['movement_type'] ?? $existing_booking['movement_type'] ?? '') === 'port_yard_movement' ? 'selected' : '' ?>>Port/Yard Movement</option>
+                                            <option value="domestic_movement" <?= ($_POST['movement_type'] ?? $existing_booking['movement_type'] ?? '') === 'domestic_movement' ? 'selected' : '' ?>>Domestic Movement</option>
+                                        </select>
+                                        <p class="text-xs text-gray-500 mt-2 flex items-center">
+                                            <i class="fas fa-info-circle mr-1"></i>
+                                            Select the type of container movement
+                                        </p>
                                     </div>
+                                    </div>
+
+                                <!-- Booking Receipt PDF Section -->
+                                <div class="form-section-header">
+                                    <div class="form-section-icon">
+                                        <i class="fas fa-file-pdf"></i>
+                                    </div>
+                                    <h2 class="form-section-title">Booking Receipt PDF <span class="text-sm font-normal text-gray-500">(Optional)</span></h2>
+                                </div>
+                                <div class="bg-white rounded-lg p-4 border border-gray-200 shadow-sm">
+                                    <?php if (!empty($existing_booking['booking_receipt_pdf'])): ?>
+                                    <div class="mb-4 p-3 bg-gray-50 rounded-lg border">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center">
+                                                <i class="fas fa-file-pdf text-red-500 mr-2"></i>
+                                                <span class="text-sm font-medium text-gray-700">Current PDF:</span>
+                                                <span class="text-sm text-gray-600 ml-2"><?= htmlspecialchars($existing_booking['booking_receipt_pdf']) ?></span>
+                                            </div>
+                                            <a href="../Uploads/booking_docs/<?= htmlspecialchars($existing_booking['booking_receipt_pdf']) ?>" 
+                                               target="_blank" 
+                                               class="inline-flex items-center px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded hover:bg-red-200 transition-colors">
+                                                <i class="fas fa-download mr-1"></i>
+                                                View Current
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <?php endif; ?>
+                                    
+                                    <div class="flex items-center justify-center w-full">
+                                        <div class="w-full">
+                                            <label for="booking_receipt_pdf" class="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors duration-200">
+                                                <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                                                    <i class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"></i>
+                                                    <p class="mb-2 text-sm text-gray-500">
+                                                        <span class="font-semibold">Click to upload</span> or drag and drop
+                                                    </p>
+                                                    <p class="text-xs text-gray-500">PDF files only (MAX. 10MB)</p>
+                                                </div>
+                                            </label>
+                                            <input id="booking_receipt_pdf" name="booking_receipt_pdf" type="file" accept=".pdf" class="mt-2 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100" />
+                                        </div>
+                                    </div>
+                                    <div class="mt-3 text-xs text-gray-500 flex items-center">
+                                        <i class="fas fa-info-circle mr-1"></i>
+                                        Upload a new PDF to replace the current one (optional)
+                                    </div>
+                                </div>
 
                                 <!-- Location Information Section -->
                                 <div class="form-section-header">
@@ -811,11 +1040,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                         <div class="autocomplete-container">
                                             <input type="text" name="from_location" id="from_location" 
                                                        class="input-enhanced pr-10" placeholder="Type to search locations..."
-                                                   autocomplete="off" value="<?= htmlspecialchars($existing_booking['from_location_name'] ?? '') ?>">
+                                                   autocomplete="off" value="<?= htmlspecialchars(($existing_booking['from_location_type'] ?? '') === 'yard' ? ($existing_booking['from_location_name'] ?? '') . ' (Yard)' : ($existing_booking['from_location_name'] ?? '') . ' (Location)') ?>">
                                                 <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                                                     <i class="fas fa-search text-gray-400"></i>
                                                 </div>
-                                            <input type="hidden" name="from_location_id" id="from_location_id" value="<?= htmlspecialchars($existing_booking['from_location_id'] ?? '') ?>">
+                                            <input type="hidden" name="from_location_id" id="from_location_id" value="<?= htmlspecialchars(($existing_booking['from_location_type'] ?? '') === 'yard' ? 'yard_' . ($existing_booking['from_location_id'] ?? '') : 'loc_' . ($existing_booking['from_location_id'] ?? '')) ?>">
                                             <div class="autocomplete-dropdown" id="from_location_dropdown"></div>
                                             </div>
                                             <div class="mt-2 text-xs text-gray-500">
@@ -834,11 +1063,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                                         <div class="autocomplete-container">
                                             <input type="text" name="to_location" id="to_location" 
                                                        class="input-enhanced pr-10" placeholder="Type to search locations..."
-                                                   autocomplete="off" value="<?= htmlspecialchars($existing_booking['to_location_name'] ?? '') ?>">
+                                                   autocomplete="off" value="<?= htmlspecialchars(($existing_booking['to_location_type'] ?? '') === 'yard' ? ($existing_booking['to_location_name'] ?? '') . ' (Yard)' : ($existing_booking['to_location_name'] ?? '') . ' (Location)') ?>">
                                                 <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                                                     <i class="fas fa-search text-gray-400"></i>
                                                 </div>
-                                            <input type="hidden" name="to_location_id" id="to_location_id" value="<?= htmlspecialchars($existing_booking['to_location_id'] ?? '') ?>">
+                                            <input type="hidden" name="to_location_id" id="to_location_id" value="<?= htmlspecialchars(($existing_booking['to_location_type'] ?? '') === 'yard' ? 'yard_' . ($existing_booking['to_location_id'] ?? '') : 'loc_' . ($existing_booking['to_location_id'] ?? '')) ?>">
                                             <div class="autocomplete-dropdown" id="to_location_dropdown"></div>
                                         </div>
                                             <div class="mt-2 text-xs text-gray-500">
@@ -1088,41 +1317,67 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                     return;
                 }
                 
-            // Show dropdown on focus
-            input.addEventListener('focus', function() {
-                const query = this.value.toLowerCase().trim();
+            
+            // Show dropdown on focus/click
+            function showDropdown() {
+                console.log('Showing dropdown for', inputId);
+                const query = input.value.toLowerCase().trim();
+                
                 const filtered = locations.filter(loc => 
-                    loc.location.toLowerCase().includes(query)
+                    !query || 
+                    loc.location.toLowerCase().includes(query) || 
+                    (loc.original_name && loc.original_name.toLowerCase().includes(query))
                 );
+                
+                console.log('Showing', filtered.length, 'locations in dropdown');
                 
                 if (filtered.length > 0) {
                     dropdown.innerHTML = filtered.map(loc => 
                         `<div class="autocomplete-item p-3 cursor-pointer hover:bg-teal-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
-                            <div class="font-medium text-gray-900">${loc.location}</div>
+                            <div class="font-medium text-gray-900">${loc.original_name || loc.location}</div>
+                            <div class="text-sm text-gray-500">${String(loc.source) === 'location' ? 'Location' : 'Yard Location'}</div>
                         </div>`
                     ).join('');
-                } else {
-                    dropdown.innerHTML = '<div class="p-3 text-gray-500 text-sm">No locations found</div>';
-                }
                     dropdown.style.display = 'block';
-            });
+                    dropdown.style.position = 'absolute';
+                    dropdown.style.zIndex = '9999';
+                    dropdown.style.backgroundColor = 'white';
+                    dropdown.style.border = '1px solid #ccc';
+                    dropdown.style.borderRadius = '4px';
+                    dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                    dropdown.style.maxHeight = '200px';
+                    dropdown.style.overflowY = 'auto';
+                    dropdown.style.width = input.offsetWidth + 'px';
+                }
+            }
+            
+            input.addEventListener('focus', showDropdown);
+            input.addEventListener('click', showDropdown);
             
             input.addEventListener('input', function() {
                 const query = this.value.toLowerCase().trim();
+                console.log('Input event triggered for', inputId, 'with query:', query);
+                console.log('Available locations:', locations.length);
                 
                 // Clear hidden input if search is empty
                 if (!query || query.trim().length === 0) {
                     hidden.value = '';
+                    dropdown.style.display = 'none';
+                    return;
                 }
                 
                 const filtered = locations.filter(loc => 
-                    loc.location.toLowerCase().includes(query)
+                    loc.location.toLowerCase().includes(query) || 
+                    (loc.original_name && loc.original_name.toLowerCase().includes(query))
                 );
+                
+                console.log('Filtered results:', filtered.length, filtered.map(l => l.original_name + ' (' + l.source + ')'));
                 
                 if (filtered.length > 0) {
                     dropdown.innerHTML = filtered.map(loc => 
                         `<div class="autocomplete-item p-3 cursor-pointer hover:bg-teal-50 border-b border-gray-100 transition-colors" data-id="${loc.id}" data-name="${loc.location}">
-                            <div class="font-medium text-gray-900">${loc.location}</div>
+                            <div class="font-medium text-gray-900">${loc.original_name || loc.location}</div>
+                            <div class="text-sm text-gray-500">${String(loc.source) === 'location' ? 'Location' : 'Yard Location'}</div>
                         </div>`
                     ).join('');
                 } else {
@@ -1445,10 +1700,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                         const toHidden = document.getElementById('container_to_location_id_' + idx);
                         if (fromHidden) fromHidden.value = container.from_location_id || '';
                         if (toHidden) toHidden.value = container.to_location_id || '';
-                        const fromLoc = (locations || []).find(l => String(l.id) === String(container.from_location_id));
-                        const toLoc = (locations || []).find(l => String(l.id) === String(container.to_location_id));
-                        if (fromInput) fromInput.value = fromLoc ? fromLoc.location : (fromInput?.value || '');
-                        if (toInput) toInput.value = toLoc ? toLoc.location : (toInput?.value || '');
+                        
+                        // Use the location names directly from the database
+                        if (fromInput && container.from_location_name) {
+                            fromInput.value = container.from_location_name;
+                        }
+                        if (toInput && container.to_location_name) {
+                            toInput.value = container.to_location_name;
+                        }
                     });
 
                     // After populating, update same-for-all checkbox state
@@ -1757,10 +2016,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'generate_booking_id') {
                 const toHidden = document.getElementById('container_to_location_id_' + idx);
                 if (fromHidden) fromHidden.value = container.from_location_id || '';
                 if (toHidden) toHidden.value = container.to_location_id || '';
-                const fromLoc = (locations || []).find(l => String(l.id) === String(container.from_location_id));
-                const toLoc = (locations || []).find(l => String(l.id) === String(container.to_location_id));
-                if (fromInput) fromInput.value = fromLoc ? fromLoc.location : (fromInput?.value || '');
-                if (toInput) toInput.value = toLoc ? toLoc.location : (toInput?.value || '');
+                
+                // Use the location names directly from the database
+                if (fromInput && container.from_location_name) {
+                    fromInput.value = container.from_location_name;
+                }
+                if (toInput && container.to_location_name) {
+                    toInput.value = container.to_location_name;
+                }
             });
 
             // After populating, update same-for-all checkbox state
