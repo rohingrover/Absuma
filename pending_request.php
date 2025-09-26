@@ -1186,8 +1186,12 @@ function getBookingStatusInfo($booking) {
             
         case 'awaiting_containers':
             $status_info['can_update_containers'] = true;
+            $status_info['can_assign_vehicles'] = ($ready_for_assignment > 0);
             $status_info['progress_message'] = "Container details: {$filled_containers}/{$total_containers} completed";
-            $status_info['next_action'] = 'Update container details as they become available';
+            if ($ready_for_assignment > 0) {
+                $status_info['progress_message'] .= ". Ready for vehicle assignment: {$ready_for_assignment} containers";
+            }
+            $status_info['next_action'] = $ready_for_assignment > 0 ? 'Assign vehicles to containers' : 'Update container details as they become available';
             break;
             
         case 'containers_updated':
